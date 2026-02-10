@@ -1,0 +1,203 @@
+:root{
+  --bg:#101112;
+  --surface:#18181A;
+  --border:#353535;
+  --text:#FFFFFF;
+  --muted:#9AA0A6;
+  --accent:#E35449;
+  --mint:#51BD89;
+
+  --font-head:"Space Grotesk",system-ui,-apple-system,Segoe UI,Arial,sans-serif;
+  --font-body:"Inter",system-ui,-apple-system,Segoe UI,Arial,sans-serif;
+
+  --padX:24px;
+  --gap:12px;
+
+  --tapMin:44px;
+  --tap:48px;
+  --r20:20px;
+  --r14:14px;
+}
+
+html{font-size:16px}
+body{
+  font-family:var(--font-body);
+  background:var(--bg);
+  color:var(--text);
+  margin:0 auto;
+  max-width:1100px;
+  padding:var(--padX);
+  line-height:1.6;
+}
+
+h1,h3{font-family:var(--font-head);margin:0}
+h1{
+  font-size:clamp(40px,6vw,56px);
+  font-weight:800;
+  line-height:1.05;
+  text-align:center;
+  letter-spacing:-.02em;
+  margin:8px 0 14px;
+}
+h3{font-size:clamp(16px,2.2vw,20px);font-weight:700}
+
+.muted{color:var(--muted);font-size:12px;letter-spacing:.02em}
+.row{display:flex;gap:var(--gap);flex-wrap:wrap}
+.tabs{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+.card{
+  background:var(--surface);
+  border:1px solid var(--border);
+  border-radius:var(--r20);
+  padding:16px;
+  flex:1;
+  min-width:280px;
+}
+
+#statusBanner{
+  padding:10px 12px;
+  border-radius:14px;
+  border:1px solid var(--border);
+  margin:10px 0 14px;
+  display:none;
+  background:rgba(24,24,26,.65);
+}
+#statusBanner.ok{border-color:rgba(81,189,137,.6);color:var(--mint)}
+#statusBanner.error{border-color:rgba(227,84,73,.75);color:var(--accent)}
+#statusBanner.info{border-color:rgba(154,160,166,.35);color:var(--muted)}
+
+input,select{
+  min-height:var(--tap);
+  padding:10px 12px;
+  font-size:16px;
+  border-radius:var(--r14);
+  border:1px solid var(--border);
+  background:#0F1114;
+  color:var(--text);
+}
+input::placeholder{color:rgba(154,160,166,.7)}
+
+button{
+  cursor:pointer;
+  min-height:52px;
+  min-width:var(--tapMin);
+  padding:10px 14px;
+  font-size:16px;
+  border-radius:999px;
+  border:1px solid var(--border);
+  background:var(--surface);
+  color:var(--text);
+  transition:transform .08s ease, filter .12s ease, box-shadow .12s ease;
+}
+button:hover{filter:brightness(1.06)}
+button:active{transform:translateY(1px)}
+button:focus-visible{outline:none;box-shadow:0 0 0 2px rgba(227,84,73,.9)}
+button:disabled{opacity:.55;pointer-events:none}
+
+.btn-primary{
+  background:var(--accent);
+  border-color:transparent;
+  min-height:56px;
+  font-weight:600;
+}
+.btn-secondary{
+  min-height:52px;
+  position:relative;
+  padding-right:52px;
+}
+.btn-secondary::after{
+  content:"→";
+  position:absolute;
+  right:10px;top:50%;
+  transform:translateY(-50%);
+  width:28px;height:28px;
+  border-radius:999px;
+  border:1px solid var(--border);
+  display:flex;align-items:center;justify-content:center;
+  font-weight:700;
+}
+.tab-btn{
+  border-radius:999px;
+  min-height:var(--tap);
+  padding:10px 14px;
+}
+.tab-btn.active{
+  border-color:var(--accent);
+  box-shadow:0 0 0 2px rgba(227,84,73,.25);
+}
+
+.btn-tmn.ok{
+  background:rgba(81,189,137,.18);
+  border-color:rgba(81,189,137,.65);
+}
+.btn-tmn.ok::before{content:"✓ ";font-weight:800;color:var(--mint)}
+
+.field-ok{border-color:rgba(81,189,137,.75)!important; box-shadow:0 0 0 2px rgba(81,189,137,.18)}
+.field-bad{border-color:rgba(227,84,73,.85)!important; box-shadow:0 0 0 2px rgba(227,84,73,.18)}
+
+.section{display:none}
+.section.active{display:block}
+
+.table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+table{width:100%;border-collapse:collapse}
+th,td{border-bottom:1px solid rgba(53,53,53,.7);padding:10px;font-size:14px;text-align:left;white-space:nowrap}
+
+/* TMN grid: desktop 2 col, mobile 1 col */
+.tmn-grid{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:10px;
+  margin-top:10px;
+}
+@media (max-width:720px){
+  body{padding:16px}
+  .row{flex-direction:column}
+  .card{min-width:auto}
+  .tmn-grid{grid-template-columns:1fr}
+}
+
+/* Mobile queue cards */
+#qCards{display:none}
+.q-card{border:1px solid rgba(53,53,53,.6);border-radius:16px;padding:12px;margin-bottom:10px;background:var(--surface)}
+@media (max-width:720px){
+  #qTable{display:none}
+  #qCards{display:block}
+}
+
+/* Withdraw layout: form + QR side-by-side on desktop, stacked on mobile */
+.wgrid{
+  display:grid;
+  grid-template-columns:1.2fr .8fr;
+  gap:12px;
+  margin-top:10px;
+}
+@media (max-width:900px){
+  .wgrid{grid-template-columns:1fr}
+}
+
+.btn-approve{
+  background:rgba(81,189,137,.18);
+  border-color:rgba(81,189,137,.65);
+}
+.btn-send{
+  background:var(--accent);
+  border-color:transparent;
+  font-weight:700;
+}
+
+/* Mobile-first basics */
+*, *::before, *::after{box-sizing:border-box}
+h1{font-size:clamp(28px,6vw,48px)}
+.tab-btn{min-height:44px;min-width:44px;padding:10px 12px}
+.tabs{flex-wrap:wrap}
+
+/* Queue table overflow safe */
+.table-wrap{width:100%;overflow-x:auto}
+.table-wrap table{min-width:720px;width:100%}
+td{overflow-wrap:anywhere}
+
+/* Mobile breakpoint */
+@media (max-width:900px){
+  .row{flex-direction:column}
+  input,select,button{width:100%}
+  .card{padding:12px}
+}

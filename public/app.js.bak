@@ -1,0 +1,574 @@
+const ADMIN_KEY_KEY = "mmk1000_admin_key";
+let DEBUG = false;
+try { DEBUG = localStorage.getItem("mmk1000_debug") === "1"; } catch { DEBUG = false; }
+const SENSITIVE = new Set(["x-tmn-login-token", "x-tmn-pin6", "x-tmn-proxy-pass"]);
+const TMN_CFG_KEY = "mmk1000_tmn_cfg";
+
+function logDebug(msg) {
+  if (!DEBUG) return;
+  try { console.log(`[mmk1000] ${msg}`); } catch {}
+}
+
+function logHeaders(tag, h) {
+  if (!DEBUG) return;
+  const arr = [...h.entries()].map(([k, v]) => [k, SENSITIVE.has(k) ? "***" : v]);
+  try { console.log(`[MMK1000] ${tag}`, arr); } catch {}
+}
+
+function showStatus(msg) {
+  const el = document.getElementById("status");
+  if (el) el.textContent = msg || "";
+  const banner = document.getElementById("statusBanner");
+  if (banner) {
+    banner.textContent = msg || "";
+    banner.style.display = msg ? "block" : "none";
+  }
+}
+
+function setStatus(type, msg) {
+  const banner = document.getElementById("statusBanner");
+  showStatus(msg);
+  if (banner) {
+    banner.className = type ? type : "info";
+  }
+}
+
+function setLoading(flag) {
+  const btns = document.querySelectorAll("button");
+  btns.forEach((b) => { b.disabled = !!flag; });
+  document.body.classList.toggle("loading", !!flag);
+}
+
+function showTab(name) {
+  const tabs = document.querySelectorAll(".tab-btn");
+  const sections = document.querySelectorAll(".section");
+  tabs.forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
+  sections.forEach((s) => s.classList.toggle("active", s.id === `tab-${name}`));
+}
+
+function sanitizeHeaderValue(v) {
+  return String(v ?? "").replace(/[\r\n]+/g, " ").trim();
+}
+
+function normalizeAdminKey(raw) {
+  const v = String(raw || "").trim().replace(/[\r\n\0]+/g, "");
+  if (!v) return "";
+  return /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(v) ? v : "";
+}
+
+function getAdminKey() {
+  const el = document.getElementById("adminKey");
+  const fromInput = normalizeAdminKey(el && el.value ? el.value : "");
+  if (fromInput) return fromInput;
+  try { return normalizeAdminKey(localStorage.getItem(ADMIN_KEY_KEY)); } catch { return ""; }
+}
+
+function saveAdminKey() {
+  const el = document.getElementById("adminKey");
+  const k = normalizeAdminKey(el && el.value ? el.value : "");
+  if (!k) {
+    try { localStorage.removeItem(ADMIN_KEY_KEY); } catch {}
+    if (el) el.value = "";
+    setStatus("error", "Invalid admin key");
+    logDebug("saveAdminKey: invalid");
+    return "";
+  }
+  try { localStorage.setItem(ADMIN_KEY_KEY, k); } catch {}
+  if (el) el.value = k;
+  setStatus("ok", "Saved");
+  logDebug("saveAdminKey: saved");
+  return k;
+}
+
+function restoreAdminKey() {
+  const el = document.getElementById("adminKey");
+  if (!el) return "";
+  if ((el.value || "").trim()) return;
+  try {
+    const k = normalizeAdminKey(localStorage.getItem(ADMIN_KEY_KEY));
+    if (!k) {
+      localStorage.removeItem(ADMIN_KEY_KEY);
+      el.value = "";
+      setStatus("error", "Invalid admin key");
+      logDebug("restoreAdminKey: invalid");
+      return "";
+    }
+    el.value = k;
+    return k;
+  } catch {}
+  logDebug("restoreAdminKey");
+  return "";
+}
+
+function loadTmnCfg() {
+  try { return JSON.parse(localStorage.getItem(TMN_CFG_KEY) || "{}"); }
+  catch { return {}; }
+}
+
+function readTmnForm() {
+  const v = (id) => (document.getElementById(id)?.value || "").trim();
+  return {
+    keyid: v("tmn_keyid"),
+    msisdn: v("tmn_msisdn"),
+    loginToken: v("tmn_login_token"),
+    tmnId: v("tmn_tmn_id"),
+    deviceId: v("tmn_device_id"),
+    pin6: v("tmn_pin6"),
+    proxyIp: v("tmn_proxy_ip"),
+    proxyUser: v("tmn_proxy_user"),
+    proxyPass: v("tmn_proxy_pass"),
+  };
+}
+
+function fillTmnForm(cfg) {
+  const s = (id, val) => { const el = document.getElementById(id); if (el) el.value = val || ""; };
+  s("tmn_keyid", cfg.keyid);
+  s("tmn_msisdn", cfg.msisdn);
+  s("tmn_login_token", cfg.loginToken);
+  s("tmn_tmn_id", cfg.tmnId);
+  s("tmn_device_id", cfg.deviceId);
+  s("tmn_pin6", cfg.pin6);
+  s("tmn_proxy_ip", cfg.proxyIp);
+  s("tmn_proxy_user", cfg.proxyUser);
+  s("tmn_proxy_pass", cfg.proxyPass);
+}
+
+function saveTmnCfg() {
+  const cfg = readTmnForm();
+  const allEmpty = Object.values(cfg).every((v) => !String(v || "").trim());
+  if (allEmpty) {
+    setStatus("error", "TMN config ว่างทั้งหมด");
+    return;
+  }
+  localStorage.setItem(TMN_CFG_KEY, JSON.stringify(cfg));
+  setStatus("ok", "Saved TMN config");
+}
+
+function clearTmnCfg() {
+  localStorage.removeItem(TMN_CFG_KEY);
+  fillTmnForm({});
+  setStatus("ok", "Cleared TMN config");
+}
+
+window.addEventListener("DOMContentLoaded", () => {
+  fillTmnForm(loadTmnCfg());
+  document.getElementById("tmn_save")?.addEventListener("click", saveTmnCfg);
+  document.getElementById("tmn_clear")?.addEventListener("click", clearTmnCfg);
+  const dbgBtn = document.getElementById("debugBtn");
+  if (dbgBtn) dbgBtn.textContent = DEBUG ? "DEBUG: ON" : "DEBUG: OFF";
+  document.querySelectorAll(".tab-btn").forEach((b) => {
+    b.addEventListener("click", () => showTab(b.dataset.tab));
+  });
+  restoreAdminKey();
+  const statusEl = document.getElementById("status");
+  if (getAdminKey()) {
+    testAdmin();
+  } else if (statusEl) {
+    setStatus("info", "กรอก ADMIN KEY แล้วกด Load");
+  }
+});
+
+window.addEventListener("storage", (e) => {
+  if (e.key === ADMIN_KEY_KEY) restoreAdminKey();
+});
+
+function headers(extra = {}) {
+  const { json, ...rest } = extra || {};
+  const h = new Headers();
+
+  // ของเดิม
+  const ak = sanitizeHeaderValue(getAdminKey());
+  if (ak) h.set("x-admin-key", ak);
+  if (json) h.set("Content-Type", "application/json");
+
+  for (const [k, v] of Object.entries(rest)) {
+    if (k == null || k === "json") continue;
+    if (v == null) continue;
+    const sv = sanitizeHeaderValue(v);
+    if (sv) h.set(k, sv);
+  }
+
+  // เพิ่ม: TMN headers (ฟอร์มก่อน, ว่างค่อย fallback localStorage)
+  const form = readTmnForm();
+  const store = loadTmnCfg();
+  const pick = (k) => form[k] || store[k] || "";
+  const c = {
+    keyid: pick("keyid"),
+    msisdn: pick("msisdn"),
+    loginToken: pick("loginToken"),
+    tmnId: pick("tmnId"),
+    deviceId: pick("deviceId"),
+    pin6: pick("pin6"),
+    proxyIp: pick("proxyIp"),
+    proxyUser: pick("proxyUser"),
+    proxyPass: pick("proxyPass"),
+  };
+  if (c.keyid)      h.set("x-tmn-keyid", sanitizeHeaderValue(c.keyid));
+  if (c.msisdn)     h.set("x-tmn-msisdn", sanitizeHeaderValue(c.msisdn));
+  if (c.loginToken) h.set("x-tmn-login-token", sanitizeHeaderValue(c.loginToken));
+  if (c.tmnId)      h.set("x-tmn-tmn-id", sanitizeHeaderValue(c.tmnId));
+  if (c.deviceId)   h.set("x-tmn-device-id", sanitizeHeaderValue(c.deviceId));
+  if (c.pin6)       h.set("x-tmn-pin6", sanitizeHeaderValue(c.pin6));
+
+  if (c.proxyIp)    h.set("x-tmn-proxy-ip", sanitizeHeaderValue(c.proxyIp));
+  if (c.proxyUser)  h.set("x-tmn-proxy-user", sanitizeHeaderValue(c.proxyUser));
+  if (c.proxyPass)  h.set("x-tmn-proxy-pass", sanitizeHeaderValue(c.proxyPass));
+
+  return h;
+}
+
+function saveKey() {
+  saveAdminKey();
+}
+
+window.headers = headers;
+window.getAdminKey = getAdminKey;
+
+function toggleDebug() {
+  try {
+    if (localStorage.getItem("mmk1000_debug") === "1") {
+      localStorage.removeItem("mmk1000_debug");
+    } else {
+      localStorage.setItem("mmk1000_debug", "1");
+    }
+  } catch {}
+  try { location.reload(); } catch {}
+}
+
+async function pingHealth() {
+  const statusEl = document.getElementById("status");
+  try {
+    setLoading(true);
+    const h = headers();
+    logHeaders("GET /api/health", h);
+    const r = await fetch("/api/health", { headers: h });
+    if (statusEl) setStatus(r.ok ? "ok" : "error", r.ok ? "ok" : `error ${r.status}`);
+  } catch {
+    if (statusEl) setStatus("error", "network error");
+  } finally {
+    setLoading(false);
+  }
+}
+
+async function authCheck() {
+  const statusEl = document.getElementById("status");
+  try {
+    setLoading(true);
+    const h = headers();
+    logHeaders("GET /api/withdraw/queue", h);
+    const r = await fetch("/api/withdraw/queue", { headers: h });
+    if (statusEl) {
+      if (r.status === 401) setStatus("error", "unauthorized");
+      else if (r.ok) setStatus("ok", "ok");
+      else setStatus("error", `error ${r.status}`);
+    }
+  } catch {
+    if (statusEl) setStatus("error", "network error");
+  } finally {
+    setLoading(false);
+  }
+}
+
+async function testAdmin() {
+  const statusEl = document.getElementById("status");
+  if (!getAdminKey()) {
+    if (statusEl) setStatus("info", "กรอก ADMIN KEY แล้วกด Load");
+    return;
+  }
+  try {
+    setLoading(true);
+    const h = headers();
+    logHeaders("GET /api/health", h);
+    const r = await fetch("/api/health", { headers: h });
+    if (r.status === 401) {
+      if (statusEl) setStatus("error", "unauthorized");
+      return;
+    }
+    if (statusEl) setStatus(r.ok ? "ok" : "error", r.ok ? "ok" : `error ${r.status}`);
+    if (r.ok) {
+      await loadDashboard();
+      await loadQueue();
+    }
+  } catch {
+    if (statusEl) setStatus("error", "network error");
+  } finally {
+    setLoading(false);
+  }
+}
+
+function fmtDest(j) {
+  if (!j?.dest) return "-";
+  if (j.type === "bank") return `${j.dest.bank_code}:${j.dest.bank_ac}`;
+  if (j.type === "promptpay") return `${j.dest.proxy_value}`;
+  if (j.type === "wallet") return `${j.dest.wallet_id}`;
+  return "-";
+}
+
+function setDatesDefault() {
+  const start = new Date(Date.now() - 86400_000).toISOString().slice(0, 10);
+  const end = new Date(Date.now() + 86400_000).toISOString().slice(0, 10);
+  document.getElementById("start").value = start;
+  document.getElementById("end").value = end;
+}
+
+function ensureAdminKey() {
+  const v = getAdminKey();
+  if (!v) {
+    setStatus("error", "กรอก ADMIN_KEY ก่อน");
+    return false;
+  }
+  return true;
+}
+
+async function loadDashboard() {
+  if (!ensureAdminKey()) return;
+  const start = document.getElementById("start").value;
+  const end = document.getElementById("end").value;
+  if (!start || !end) return setStatus("error", "กรอกช่วงวันที่ start/end ให้ครบ");
+
+  try {
+    setLoading(true);
+    const h = headers();
+    logHeaders("GET /api/dashboard", h);
+    const r = await fetch(`/api/dashboard?start=${start}&end=${end}`, { headers: h });
+    const j = await r.json();
+    if (!j.ok) return setStatus("error", j.error || j.message || "error");
+
+    const b = j.balance;
+    document.getElementById("balance").textContent = (b.balance ?? b).toString();
+    document.getElementById("balMode").textContent = `[${b.mode}]`;window.__tmnMode = b.mode || "mock";
+
+    const body = document.getElementById("txBody");
+    body.innerHTML = "";
+
+    const tx = j.tx;
+    const items = tx.items || tx.res?.data?.items || tx.res?.items || [];
+    for (const it of items) {
+      const tr = document.createElement("tr");
+      tr.innerHTML =
+        `<td>${it.at || it.created_at || "-"}</td>` +
+        `<td>${it.type || it.txn_type || "-"}</td>` +
+        `<td>${it.amount || "-"}</td>` +
+        `<td>${it.report_id || it.id || "-"}</td>`;
+      body.appendChild(tr);
+    }
+    setStatus("ok", "Loaded dashboard");
+  } finally {
+    setLoading(false);
+  }
+}
+
+function renderWithdrawFields() {
+  const t = document.getElementById("wType").value;
+  const wrap = document.getElementById("wFields");
+
+  if (t === "bank") {
+    wrap.innerHTML = `
+      <div class="row">
+        <div><div class="muted">bank_code</div><input id="bankCode" placeholder="SCB" style="width:90px"></div>
+        <div style="flex:1"><div class="muted">bank_ac</div><input id="bankAc" placeholder="บัญชี" inputmode="numeric"></div>
+      </div>`;
+  } else if (t === "promptpay") {
+    wrap.innerHTML = `
+      <div class="row">
+        <div style="flex:1"><div class="muted">proxy_value</div><input id="ppProxy" placeholder="เบอร์/บัตร" inputmode="numeric"></div>
+      </div>`;
+  } else {
+    wrap.innerHTML = `
+      <div class="row">
+        <div style="flex:1"><div class="muted">wallet_id</div><input id="walletId" placeholder="เบอร์วอลเล็ตปลายทาง" inputmode="numeric"></div>
+      </div>`;
+  }
+}
+
+async function createWithdraw() {
+  if (!ensureAdminKey()) return;
+  const type = document.getElementById("wType").value;
+
+  // amount: ต้องเป็นตัวเลข > 0
+  const amount = Number((document.getElementById("wAmount").value || "").trim());
+  if (!Number.isFinite(amount) || amount <= 0) return setStatus("error", "Amount ต้องเป็นเลขมากกว่า 0");
+
+  const dest = {};
+
+  if (type === "bank") {
+    const bank_code = (document.getElementById("bankCode").value || "").trim().toUpperCase();
+    const bank_ac = (document.getElementById("bankAc").value || "").trim().replace(/\s+/g, "");
+
+    if (!bank_code) return setStatus("error", "กรอก bank_code");
+    if (!bank_ac) return setStatus("error", "กรอก bank_ac");
+
+    dest.bank_code = bank_code;
+    dest.bank_ac = bank_ac;
+  }
+
+  if (type === "promptpay") {
+    // เก็บเป็น string เท่านั้น (ห้าม Number) เพื่อไม่ให้ 0 นำหน้าหาย :contentReference[oaicite:2]{index=2}
+    let v = (document.getElementById("ppProxy").value || "").trim().replace(/\D/g, "");
+    if (!v) return setStatus("error", "กรอก proxy_value");
+    
+        if (window.__tmnMode === "real" && v.length === 15) {
+      return setStatus("error", "โหมดจริงยังไม่รองรับ PromptPay แบบ E-Wallet ID (15 หลัก) — กรุณาใช้ เบอร์โทร/บัตรประชาชน หรือเปลี่ยนช่องทางโอน");
+    }
+
+    // ถ้าเป็นมือถือแบบใน QR จะเจอ 0066XXXXXXXXX (13 หลัก) → แปลงเป็น 0XXXXXXXXX :contentReference[oaicite:3]{index=3}
+    if (v.length === 13 && v.startsWith("0066")) v = "0" + v.slice(4);
+
+    // ยอมรับ: 10 (มือถือ), 13 (บัตร/Tax), 15 (ewallet id) :contentReference[oaicite:4]{index=4}
+    if (![10, 13, 15].includes(v.length)) {
+      return setStatus("error", "proxy_value ต้องเป็นเลข 10/13/15 หลัก");
+      
+    }
+
+    dest.proxy_value = v; // string
+  }
+
+  if (type === "wallet") {
+    const wallet_id = (document.getElementById("walletId").value || "").trim().replace(/\s+/g, "");
+    if (!wallet_id) return setStatus("error", "กรอก wallet_id");
+    dest.wallet_id = wallet_id;
+  }
+
+  try {
+    setLoading(true);
+    const h = headers({ json: true });
+    logHeaders("POST /api/withdraw/create", h);
+    const r = await fetch("/api/withdraw/create", {
+      method: "POST",
+      headers: h, // ต้องคืน { "Content-Type":"application/json", "x-admin-key": key() }
+      body: JSON.stringify({ type, amount, dest }),
+    });
+
+    const j = await r.json();
+    if (!j.ok) return setStatus("error", j.error || j.message || "error");
+    setStatus("ok", "Created");
+    await loadQueue();
+  } finally {
+    setLoading(false);
+  }
+}
+
+async function loadQueue() {
+  if (!ensureAdminKey()) return;
+  try {
+    setLoading(true);
+    const h = headers();
+    logHeaders("GET /api/withdraw/queue", h);
+    const r = await fetch("/api/withdraw/queue", { headers: h });
+    const j = await r.json();
+    if (!j.ok) return setStatus("error", j.error || j.message || "error");
+
+    const body = document.getElementById("qBody");
+    const cards = document.getElementById("qCards");
+    body.innerHTML = "";
+    if (cards) cards.innerHTML = "";
+
+    for (const it of j.items) {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${it.status}</td>
+        <td>${it.type}</td>
+        <td>${it.amount}</td>
+        <td>${fmtDest(it)}</td>
+        <td>
+          <button onclick="approve('${it.id}')">Approve</button>
+          <button onclick="sendNow('${it.id}')">Send</button>
+        </td>`;
+      body.appendChild(tr);
+      if (cards) {
+        const c = document.createElement("div");
+        c.className = "q-card";
+        c.innerHTML = `
+          <div><b>${it.status}</b> · ${it.type}</div>
+          <div class="row">
+            <div>Amount: ${it.amount}</div>
+            <div>Dest: ${fmtDest(it)}</div>
+          </div>
+          <div class="row">
+            <button onclick="approve('${it.id}')">Approve</button>
+            <button onclick="sendNow('${it.id}')">Send</button>
+          </div>`;
+        cards.appendChild(c);
+      }
+    }
+    setStatus("ok", "Loaded queue");
+  } finally {
+    setLoading(false);
+  }
+}
+
+async function approve(id) {
+  if (!ensureAdminKey()) return;
+  try {
+    setLoading(true);
+    const h = headers();
+    logHeaders("POST /api/withdraw/:id/approve", h);
+    const r = await fetch(`/api/withdraw/${id}/approve`, { method: "POST", headers: h });
+    const j = await r.json();
+    if (!j.ok) return setStatus("error", j.error || j.message || "error");
+    setStatus("ok", "Approved");
+    await loadQueue();
+  } finally {
+    setLoading(false);
+  }
+}
+
+async function sendNow(id) {
+  if (!ensureAdminKey()) return;
+  try {
+    setLoading(true);
+    const h = headers();
+    logHeaders("POST /api/withdraw/:id/send", h);
+    const r = await fetch(`/api/withdraw/${id}/send`, { method: "POST", headers: h });
+    const j = await r.json();
+    if (!j.ok) return setStatus("error", j.error || j.message || "error");
+    setStatus("ok", "Sent");
+    await loadQueue();
+  } finally {
+    setLoading(false);
+  }
+}
+
+async function decodeQr() {
+  if (!ensureAdminKey()) return;
+  const f = document.getElementById("qrFile").files[0];
+  if (!f) return setStatus("error", "เลือกไฟล์รูปก่อน");
+  if (!f.type.startsWith("image/")) return setStatus("error", "ไฟล์ไม่ใช่รูปภาพ");
+
+  const fd = new FormData();
+  fd.append("image", f);
+
+  try {
+    setLoading(true);
+    const h = headers();
+    logHeaders("POST /api/qr/decode", h);
+    const r = await fetch("/api/qr/decode", {
+      method: "POST",
+      headers: h,
+      body: fd,
+    });
+
+    const j = await r.json();
+    document.getElementById("qrOut").textContent = JSON.stringify(j, null, 2);
+
+    // ถ้าเป็น promptpay → เติม proxy ให้ฟอร์มถอนทันที
+    if (j.ok && j.parsed?.ok && j.parsed?.proxyValue) {
+      document.getElementById("wType").value = "promptpay";
+      renderWithdrawFields();
+      document.getElementById("ppProxy").value = j.parsed.proxyValue;
+    }
+    setStatus("ok", "Decoded");
+  } finally {
+    setLoading(false);
+  }
+}
+
+setDatesDefault();
+renderWithdrawFields();
+
+/*
+QA manual:
+1) Mobile: tabs switch, queue shows cards, tables scroll.
+2) Admin key invalid in localStorage clears + shows status.
+3) Load/Queue/Send/Approve/Decode show banner + disable buttons while loading.
+*/

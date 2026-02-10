@@ -1,0 +1,183 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>MMK1000 Panel</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@600;700;800&display=swap" rel="stylesheet">
+  <link rel="manifest" href="/app.webmanifest">
+  <link rel="stylesheet" href="/style.css?v=20260209-1">
+</head>
+
+<body>
+  <h1>MMK1000 Panel</h1>
+
+  <div id="statusBanner" class="info"></div>
+
+  <!-- Tabs -->
+  <div class="tabs" style="align-items:center; margin:10px 0 16px;">
+    <button id="tmnToggleBtn" class="tab-btn btn-tmn" type="button" aria-controls="tmnPanel" aria-expanded="false" onclick="toggleDisclosure()">TMN Real Config</button>
+    <button class="tab-btn" data-tab="dashboard" type="button">Dashboard</button>
+    <button class="tab-btn" data-tab="withdraw" type="button">Withdraw</button>
+    <button class="tab-btn" data-tab="qr" type="button">QR</button>
+  </div>
+
+  <!-- ✅ TMN Panel (ซ่อน/แสดงด้วยปุ่ม) -->
+  <div id="tmnPanel" class="card" hidden style="margin-bottom:12px;">
+    <h3>TMN Real Config</h3>
+    <div class="muted">กรอกครั้งเดียว/เครื่องนี้ — กรอกครบแล้วปุ่มจะเป็นสีเขียว</div>
+
+    <div class="tmn-grid">
+      <label>TMNONE_KEYID<br><input id="tmn_keyid" placeholder="ตัวเลข" /></label>
+      <label>TMN_MSISDN<br><input id="tmn_msisdn" placeholder="668xxxxxxxxx" /></label>
+
+      <label>TMN_LOGIN_TOKEN<br><input id="tmn_login_token" type="password" placeholder="token" /></label>
+      <label>TMN_TMN_ID<br><input id="tmn_tmn_id" type="password" placeholder="tmn_id" /></label>
+
+      <label>TMN_DEVICE_ID (optional)<br><input id="tmn_device_id" placeholder="" /></label>
+      <label>TMN_PIN6<br><input id="tmn_pin6" type="password" placeholder="123456" /></label>
+
+      <label>PROXY_IP (optional)<br><input id="tmn_proxy_ip" placeholder="" /></label>
+      <label>PROXY_USERNAME (optional)<br><input id="tmn_proxy_user" placeholder="" /></label>
+
+      <label>PROXY_PASSWORD (optional)<br><input id="tmn_proxy_pass" type="password" placeholder="" /></label>
+    </div>
+
+    <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+      <button class="btn-primary" id="tmn_save" type="button">Save TMN</button>
+      <button id="tmn_clear" type="button">Clear TMN</button>
+      <span id="tmnStatus" class="muted"></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="row" style="align-items:flex-end;">
+      <div>
+        <div class="muted">ADMIN KEY</div>
+        <input id="adminKey" placeholder="mmk1000" style="width:220px" />
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="btn-primary" type="button" onclick="saveAdminKey()">Save</button>
+        <button type="button" onclick="authCheck()">Auth Check</button>
+        <button type="button" onclick="pingHealth()">Ping /api/health</button>
+        <button id="debugBtn" type="button" onclick="toggleDebug()">DEBUG: OFF</button>
+        <span id="status" class="muted"></span>
+      </div>
+    </div>
+  </div>
+
+  <div id="tab-dashboard" class="section active">
+    <div class="row">
+      <div class="card">
+        <h3>1) Dashboard</h3>
+
+        <div class="row" style="align-items:flex-end;">
+          <div>
+            <div class="muted">Start</div>
+            <input id="start" type="date" />
+          </div>
+          <div>
+            <div class="muted">End</div>
+            <input id="end" type="date" />
+          </div>
+          <div>
+            <button class="btn-primary" type="button" onclick="loadDashboard()">Refresh</button>
+          </div>
+        </div>
+
+        <div style="margin:10px 0 6px;">
+          <div class="muted">Account</div>
+          <div><b id="accountName">-</b></div>
+        </div>
+
+        <div class="row" style="margin:10px 0;">
+          <div class="card" style="min-width:220px;">
+            <div class="muted">Balance</div>
+            <div><b id="balance">-</b> <span class="muted" id="balMode"></span></div>
+          </div>
+          <div class="card" style="min-width:220px;">
+            <div class="muted">In (sum)</div>
+            <div><b id="sumIn">-</b></div>
+          </div>
+          <div class="card" style="min-width:220px;">
+            <div class="muted">Out (sum)</div>
+            <div><b id="sumOut">-</b></div>
+          </div>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>time</th><th>type</th><th>amount</th><th>id</th></tr></thead>
+            <tbody id="txBody"></tbody>
+          </table>
+        </div>
+
+        <div class="muted" style="margin-top:10px;">* ถ้า backend ส่งชื่อบัญชีมา (เช่น account_name) หน้าจะโชว์ให้เอง</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="tab-withdraw" class="section">
+    <div class="card">
+      <h3>2) Withdraw (คิว + อนุมัติ)</h3>
+
+      <!-- row 1 -->
+      <div class="row" style="align-items:flex-end;">
+        <div>
+          <div class="muted">Type</div>
+          <select id="wType" onchange="renderWithdrawFields()">
+            <option value="bank">Bank</option>
+            <option value="promptpay">PromptPay</option>
+            <option value="wallet">TrueWallet (P2P)</option>
+          </select>
+        </div>
+        <div>
+          <div class="muted">Amount</div>
+          <input id="wAmount" type="number" step="0.01" inputmode="decimal" placeholder="0.00" />
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="btn-primary" type="button" onclick="createWithdraw()">Add Queue</button>
+          <button type="button" onclick="loadQueue()">Refresh Queue</button>
+        </div>
+      </div>
+
+      <div class="wgrid">
+        <div class="card" style="margin:0;">
+          <div class="muted">Destination</div>
+          <div id="wFields" style="margin-top:8px;"></div>
+          <div class="muted" id="destHint" style="margin-top:8px;"></div>
+        </div>
+
+        <div id="qrCard" class="card" style="margin:0;">
+          <div class="muted">QR PromptPay (decode → เติม proxy)</div>
+          <div class="row" style="align-items:flex-end; margin-top:8px;">
+            <div style="flex:1;">
+              <input id="qrFile" type="file" accept="image/*" />
+            </div>
+            <div>
+              <button class="btn-primary" type="button" onclick="decodeQrIntoWithdraw(this)">Decode</button>
+            </div>
+          </div>
+          <pre id="qrOut" style="white-space:pre-wrap; margin-top:10px;"></pre>
+        </div>
+      </div>
+
+      <div id="qCards" style="margin-top:12px;"></div>
+
+      <div class="table-wrap" id="qTable" style="margin-top:12px;">
+        <table>
+          <thead><tr><th>status</th><th>type</th><th>amount</th><th>dest</th><th>actions</th></tr></thead>
+          <tbody id="qBody"></tbody>
+        </table>
+      </div>
+
+      <div class="muted" style="margin-top:10px;">* Approve = เขียว, Send = แดง และมี confirm รายละเอียดก่อนทำงาน</div>
+    </div>
+  </div>
+
+  <script src="/app.js?v=20260210_1"></script>
+</body>
+</html>
