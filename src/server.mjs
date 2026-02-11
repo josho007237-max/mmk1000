@@ -9,6 +9,7 @@ import {
   ensureDataDir, listWithdrawals, createWithdrawal,
   approveWithdrawal, markWithdrawalResult, getWithdrawal
 } from "./withdraw.store.mjs";
+// NOTE: Withdraw single source of truth = `data/withdraw-queue.json` via `withdraw.store.mjs`.
 
 import { decodeQrPayloadFromImage, tryParsePromptPay } from "./qr.decode.mjs";
 
@@ -77,23 +78,42 @@ function getTmnCfg(req) {
 
 function validateEnv() {
   const mode = String(process.env.TMN_MODE || "mock").toLowerCase();
-  if (mode !== "real") return;
-  const required = [
+  if (mode !== "real") {
+    return { mode, ok: true, issues: [] };
+  }
+  const requiredCore = [
     "TMNONE_KEYID",
     "TMN_MSISDN",
     "TMN_LOGIN_TOKEN",
     "TMN_TMN_ID",
     "TMN_DEVICE_ID",
     "TMN_PIN6",
-    "PROXY_IP",
-    "PROXY_USERNAME",
-    "PROXY_PASSWORD",
   ];
+  const proxyKeys = ["PROXY_IP", "PROXY_USERNAME", "PROXY_PASSWORD"];
+  const issues = [];
+
+  const proxyAnySet = proxyKeys.some((key) => String(process.env[key] || "").trim());
+  const required = proxyAnySet ? [...requiredCore, ...proxyKeys] : requiredCore;
+
+  const status = {};
+  for (const key of [...requiredCore, ...proxyKeys]) {
+    status[key] = String(process.env[key] || "").trim() ? "(set)" : "missing";
+  }
+
   for (const key of required) {
     if (!String(process.env[key] || "").trim()) {
-      throw new Error(`missing_real_config:${key}`);
+      issues.push(`missing_real_config:${key}`);
     }
   }
+  if (proxyAnySet && issues.length) {
+    issues.push("proxy_partial_config");
+  }
+  console.log("[MMK1000] real env status", status);
+  if (issues.length) {
+    console.error("[MMK1000] real mode config missing:", issues.join(", "));
+    process.exit(1);
+  }
+  return { mode, ok: issues.length === 0, issues };
 }
 
 function sendOk(res, data = {}, status = 200) {
@@ -237,11 +257,17 @@ const __dirname = path.dirname(__filename);
 app.use(express.static(path.join(__dirname, "../public")));
 app.get("/", (req, res) => res.sendFile(path.join(__dirname, "../public/index.html")));
 
-validateEnv();
+const envCheck = validateEnv();
 await ensureDataDir();
 console.log("[doctor] cwd=", process.cwd());
 console.log("[doctor] withdraw queue file=", WITHDRAW_QUEUE_FILE);
 console.log("[doctor] withdraw source=withdraw.store.mjs");
 console.log("[doctor] single source of truth: withdraw-queue.json");
-console.log("[MMK1000] TMN_MODE=", process.env.TMN_MODE || "mock");
+console.log(`[MMK1000] startup mode=${envCheck.mode} port=${PORT}`);
+if (envCheck.mode === "real") {
+  console.log(`[MMK1000] real config ready=${envCheck.ok} debug_headers=${String(process.env.DEBUG_HEADERS || "0")}`);
+  if (!envCheck.ok) {
+    console.warn("[MMK1000] WARNING real mode config not ready:", envCheck.issues.join(", "));
+  }
+}
 app.listen(PORT, () => console.log(`[MMK1000] http://127.0.0.1:${PORT}`));

@@ -1,6 +1,9 @@
 import fs from "fs";
 import path from "path";
 
+// DEPRECATED: Legacy DB helper for old `withdraw.repo.mjs` flow only.
+// MMK1000 server path uses `withdraw.store.mjs` as the active store.
+
 const DATA_DIR = path.join(process.cwd(), "data");
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 console.log("[doctor] withdraw file= data/withdraw-queue.json (single source of truth)");

@@ -19,7 +19,17 @@ async function readAll() {
 }
 
 async function writeAll(data) {
-  await fs.writeFile(QUEUE_FILE, JSON.stringify(data, null, 2), "utf8");
+  const tmp = `${QUEUE_FILE}.tmp`;
+  await fs.writeFile(tmp, JSON.stringify(data, null, 2), "utf8");
+  await fs.rename(tmp, QUEUE_FILE);
+}
+
+export async function backupWithdrawQueue() {
+  await ensureDataDir();
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const backupFile = path.join(DATA_DIR, `withdraw-queue.bak-${timestamp}.json`);
+  await fs.copyFile(QUEUE_FILE, backupFile);
+  return backupFile;
 }
 
 export async function listWithdrawals() {

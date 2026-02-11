@@ -1,6 +1,10 @@
 import crypto from "crypto";
 import { DB } from "./db.mjs";
 
+// DEPRECATED: Legacy repo layer retained for compatibility only.
+// MMK1000 runtime uses `withdraw.store.mjs` + `data/withdraw-queue.json` directly.
+// This file is not imported by `src/server.mjs`.
+
 function nowISO() {
   return new Date().toISOString();
 }
