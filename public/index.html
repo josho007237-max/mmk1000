@@ -46,24 +46,47 @@
       <label>PROXY_PASSWORD (optional)<br><input id="tmn_proxy_pass" type="password" placeholder="" /></label>
     </div>
 
+    <div style="margin-top:10px;">
+      <div id="tmnPasteLabel" class="muted">Paste block (KEY=VALUE หลายบรรทัด)</div>
+      <textarea id="tmn_paste_block" rows="6" placeholder="TMNONE_KEYID=123456&#10;TMN_MSISDN=668xxxxxxxxx&#10;TMN_LOGIN_TOKEN=..."></textarea>
+    </div>
+
+    <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+      <button id="tmn_apply_paste" type="button">Apply Paste</button>
+      <button id="tmn_export_json" type="button">Export config (.json)</button>
+      <button id="tmn_import_json" type="button">Import config (.json)</button>
+      <input id="tmn_import_file" type="file" accept=".json,application/json" hidden>
+    </div>
+
     <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
       <button class="btn-primary" id="tmn_save" type="button">บันทึก TMN</button>
+      <button id="tmn_test_balance" type="button">ทดสอบโหมดจริง (Balance)</button>
       <button id="tmn_clear" type="button">ล้างค่า TMN</button>
       <span id="tmnStatus" class="muted"></span>
     </div>
+    <div id="tmnTestStatus" class="muted" style="margin-top:6px;"></div>
   </div>
 
   <div class="card">
     <div class="row" style="align-items:flex-end;">
       <div>
         <div class="muted">ADMIN KEY</div>
-        <input id="adminKey" placeholder="mmk1000" style="width:220px" />
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <input id="adminKey" placeholder="mmk1000" style="width:220px" />
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;">
+            <input id="rememberAdmin" type="checkbox" style="width:16px;height:16px;"> จำคีย์
+          </label>
+        </div>
+        <div id="adminKeyStorageInfo" class="muted" style="font-size:12px;margin-top:6px;"></div>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
         <button class="btn-primary" type="button" onclick="saveAdminKey()">บันทึก</button>
         <button type="button" onclick="authCheck()">ตรวจสิทธิ์</button>
         <button type="button" onclick="pingHealth()">ตรวจ /api/health</button>
+        <button id="btnClearClient" type="button">Clear (SW+Cache+Storage)</button>
+        <button id="btnTestBalance" type="button">Test Balance</button>
         <button id="debugBtn" type="button" onclick="toggleDebug()">DEBUG: OFF</button>
+        <button id="devSwResetBtn" type="button" style="display:none;">Unregister SW + Clear cache</button>
         <span id="status" class="muted"></span>
       </div>
     </div>
@@ -178,6 +201,14 @@
     </div>
   </div>
 
-  <script src="/app.js?v=202602111030"></script>
+  <script>
+    (function () {
+      var host = (location && location.hostname) ? location.hostname : "";
+      var isDevHost = (host === "localhost" || host === "127.0.0.1");
+      window.__MMK_DEV_HOST__ = isDevHost;
+      window.__MMK_DISABLE_SW__ = isDevHost;
+    })();
+  </script>
+  <script src="/app.js?v=1"></script>
 </body>
 </html>

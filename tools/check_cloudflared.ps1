@@ -22,4 +22,4 @@ Write-Host "Next commands:" -ForegroundColor Cyan
 Write-Host "cloudflared tunnel login"
 Write-Host "cloudflared tunnel route dns mmk1000-panel $Hostname"
 Write-Host "nslookup $Hostname"
-Write-Host "curl https://$Hostname/ -I"
+Write-Host "curl --ssl-no-revoke https://$Hostname/ -I"

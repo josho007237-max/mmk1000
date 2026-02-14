@@ -49,7 +49,7 @@ Write-Host "Verify in Cloudflare Zero Trust UI: Access > Applications > mmk1000-
 ```powershell
 cloudflared tunnel route dns mmk1000-panel mmk1000-dev.bn9.app
 nslookup mmk1000-dev.bn9.app
-curl https://mmk1000-dev.bn9.app/ -I
+curl --ssl-no-revoke https://mmk1000-dev.bn9.app/ -I
 ```
 
 ## Phase D — Frontend Safety + Banner

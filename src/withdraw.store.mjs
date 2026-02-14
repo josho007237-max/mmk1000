@@ -5,6 +5,9 @@ import crypto from "crypto";
 
 const DATA_DIR = path.resolve(process.cwd(), "data");
 const QUEUE_FILE = path.join(DATA_DIR, "withdraw-queue.json");
+export const WITHDRAW_STORE = "withdraw.store.mjs";
+export const WITHDRAW_STORAGE_TYPE = "file";
+export const WITHDRAW_STORAGE_PATH = QUEUE_FILE;
 
 export async function ensureDataDir() {
   await fs.mkdir(DATA_DIR, { recursive: true });
@@ -47,7 +50,7 @@ function validateCreate(body) {
   if (!Number.isFinite(amount) || amount <= 0) throw new Error("bad_amount");
 
   const type = body.type;
-  if (!["bank","promptpay","wallet"].includes(type)) throw new Error("bad_type");
+  if (!["bank","promptpay","wallet","p2p"].includes(type)) throw new Error("bad_type");
 
   const dest = body.dest || {};
   if (type === "bank") {
@@ -58,6 +61,9 @@ function validateCreate(body) {
   }
   if (type === "wallet") {
     if (!dest.wallet_id) throw new Error("wallet_dest_missing");
+  }
+  if (type === "p2p") {
+    if (!dest.proxy_value) throw new Error("p2p_dest_missing");
   }
 
   return { type, amount, dest, note: body.note || "" };

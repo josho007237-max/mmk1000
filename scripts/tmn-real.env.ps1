@@ -1,0 +1,7 @@
+$env:TMN_MODE = "real"
+$env:TMNONE_KEYID = ""
+$env:TMN_MSISDN = ""
+$env:TMN_LOGIN_TOKEN = ""
+$env:TMN_TMN_ID = ""
+$env:TMN_DEVICE_ID = ""
+$env:TMN_PIN6 = ""

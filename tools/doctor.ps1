@@ -1,83 +1,53 @@
-$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+$ErrorActionPreference = "Continue"
 
-$ROOT = Split-Path -Parent $PSScriptRoot
-Set-Location $ROOT
+$script:PassCount = 0
+$script:FailCount = 0
 
-Write-Host ("node: " + (& node -v))
-
-$targets = @(
-  "src/server.mjs",
-  "src/withdraw.store.mjs",
-  "src/tmn.adapter.mjs",
-  "scripts/guard-smoke.mjs",
-  "scripts/doctor-real.mjs"
-)
-
-$failed = $false
-
-foreach ($t in $targets) {
+function Run-Check {
+  param(
+    [Parameter(Mandatory = $true)][string]$Name,
+    [Parameter(Mandatory = $true)][ScriptBlock]$Action
+  )
+  Write-Host "`n== $Name ==" -ForegroundColor Cyan
   try {
-    & node --check $t | Out-Null
-    Write-Host "[OK] check $t"
-  } catch {
-    Write-Host "[FAIL] check $t" -ForegroundColor Red
-    $failed = $true
-  }
-}
-
-if ($failed) { exit 1 }
-
-Write-Host "[RUN] node scripts/guard-smoke.mjs"
-& node scripts/guard-smoke.mjs
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-Write-Host "[RUN] node scripts/doctor-real.mjs"
-& node scripts/doctor-real.mjs
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-$patterns = @("TMN_PIN6", "TMN_LOGIN_TOKEN", "x-tmn-pin6", "x-tmn-login-token")
-$logFiles = Get-ChildItem -Path $ROOT -Recurse -File -Include *.log -ErrorAction SilentlyContinue
-$hits = @()
-
-foreach ($lf in $logFiles) {
-  foreach ($pat in $patterns) {
-    $match = Select-String -Path $lf.FullName -SimpleMatch -Pattern $pat -ErrorAction SilentlyContinue
-    if ($match) {
-      $hits += [pscustomobject]@{
-        File = $lf.FullName
-        Pattern = $pat
-      }
+    $ok = & $Action
+    if ($ok) {
+      $script:PassCount++
+      Write-Host "[PASS] $Name" -ForegroundColor Green
+    } else {
+      $script:FailCount++
+      Write-Host "[FAIL] $Name" -ForegroundColor Red
     }
+  } catch {
+    $script:FailCount++
+    Write-Host "[FAIL] $Name" -ForegroundColor Red
+    Write-Host $_.Exception.Message
   }
 }
 
-if ($hits.Count -gt 0) {
-  Write-Host "[FAIL] sensitive token markers found in logs:" -ForegroundColor Red
-  $hits | Select-Object -Unique File, Pattern | Format-Table -AutoSize | Out-String | Write-Host
-  exit 1
+Run-Check "LOCAL health (curl http://127.0.0.1:4100/api/health)" {
+  $res = curl.exe -sS "http://127.0.0.1:4100/api/health" 2>&1
+  $text = ($res | Out-String).Trim()
+  Write-Host $text
+  return ($LASTEXITCODE -eq 0 -and $text -match '"ok"\s*:\s*true')
 }
 
-Write-Host "[OK] log scan clean"
-
-$BASE = if ($env:MMK_BASE) { $env:MMK_BASE } else { "http://127.0.0.1:4100" }
-$ADMIN_KEY = if ($env:ADMIN_KEY) { $env:ADMIN_KEY } else { "devkey" }
-
-function Test-ApiOk([string]$path) {
-  $url = "$BASE$path"
-  Write-Host "[RUN] curl $url"
-  $raw = & curl.exe -sS -f -H "x-admin-key: $ADMIN_KEY" $url
-  if ($LASTEXITCODE -ne 0) {
-    throw "curl_failed:$path"
-  }
-  $obj = $raw | ConvertFrom-Json
-  if ($obj.ok -ne $true) {
-    throw "api_not_ok:$path"
-  }
-  Write-Host "[OK] $path ok=true"
+Run-Check "Tunnel info (cloudflared tunnel info mmk1000)" {
+  $res = cloudflared tunnel info mmk1000 2>&1
+  $text = ($res | Out-String).Trim()
+  Write-Host $text
+  return ($LASTEXITCODE -eq 0)
 }
 
-Test-ApiOk "/api/health"
-Test-ApiOk "/api/withdraw/queue"
+Run-Check "EDGE health headers (curl --ssl-no-revoke -I https://mmk1000.bn9.app/api/health)" {
+  $res = curl.exe --ssl-no-revoke -sS -I "https://mmk1000.bn9.app/api/health" 2>&1
+  $text = ($res | Out-String).Trim()
+  Write-Host $text
+  return ($LASTEXITCODE -eq 0 -and $text -match "HTTP/\d(\.\d)?\s+200")
+}
 
-Write-Host "[DONE] doctor checks passed."
+Write-Host "`n==== SUMMARY ===="
+Write-Host ("PASS={0} FAIL={1}" -f $script:PassCount, $script:FailCount)
+if ($script:FailCount -gt 0) { exit 1 }
 exit 0

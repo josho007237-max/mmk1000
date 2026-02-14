@@ -18,6 +18,46 @@ Smoke test:
 node .\scripts\smoke.mjs
 ```
 
+## VPS SSH Quick Check (PowerShell)
+Use the real Public IP from your VPS provider dashboard (do not use `x.x.x.x`).
+
+```powershell
+$VpsIPv4 = "<PUBLIC_IPV4_FROM_PROVIDER>"
+$VpsIPv6 = "<PUBLIC_IPV6_FROM_PROVIDER>"   # optional
+$VpsDomain = "<VPS_DOMAIN_OR_HOSTNAME>"    # optional
+$SshPort = 22
+
+# 1) Validate IPv4/IPv6 format before port checks
+$ip4 = $null
+if (-not [System.Net.IPAddress]::TryParse($VpsIPv4, [ref]$ip4)) {
+  throw "Invalid IPv4: $VpsIPv4"
+}
+
+if ($VpsIPv6 -and $VpsIPv6 -ne "<PUBLIC_IPV6_FROM_PROVIDER>") {
+  $ip6 = $null
+  if (-not [System.Net.IPAddress]::TryParse($VpsIPv6, [ref]$ip6)) {
+    throw "Invalid IPv6: $VpsIPv6"
+  }
+}
+
+# 2) Port checks
+Test-NetConnection -ComputerName $VpsIPv4 -Port $SshPort
+if ($ip6) { Test-NetConnection -ComputerName $VpsIPv6 -Port $SshPort }
+
+# 3) Domain case (DNS resolve + SSH port)
+if ($VpsDomain -and $VpsDomain -ne "<VPS_DOMAIN_OR_HOSTNAME>") {
+  Resolve-DnsName -Name $VpsDomain -Type A
+  Resolve-DnsName -Name $VpsDomain -Type AAAA
+  Test-NetConnection -ComputerName $VpsDomain -Port $SshPort
+}
+```
+
+SSH examples:
+```powershell
+ssh <user>@<PUBLIC_IPV4_FROM_PROVIDER>
+ssh <user>@[<PUBLIC_IPV6_FROM_PROVIDER>]
+```
+
 ## Localhost vs 127.0.0.1
 Do not switch between `localhost` and `127.0.0.1` for the UI. They are different origins and do not share `localStorage`.
 

@@ -18,8 +18,8 @@ Resolve-DnsName mmk1000-dev.bn9.app
 Resolve-DnsName mmk1000.bn9.app
 nslookup mmk1000-dev.bn9.app
 nslookup mmk1000.bn9.app
-curl https://mmk1000-dev.bn9.app/ -I
-curl https://mmk1000.bn9.app/ -I
+curl --ssl-no-revoke https://mmk1000-dev.bn9.app/ -I
+curl --ssl-no-revoke https://mmk1000.bn9.app/ -I
 ```
 
 ## CNAME expectation

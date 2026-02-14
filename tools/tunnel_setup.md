@@ -29,6 +29,6 @@ cloudflared tunnel --config "$env:USERPROFILE\.cloudflared\config.yml" run mmk10
 curl http://localhost:4100/ -I
 curl http://localhost:4100/api/health
 
-curl https://mmk1000.bn9.app/ -I
-curl https://mmk1000.bn9.app/api/health
+curl --ssl-no-revoke https://mmk1000.bn9.app/ -I
+curl --ssl-no-revoke https://mmk1000.bn9.app/api/health
 ```

@@ -1,7 +1,10 @@
 {
   "type": "module",
   "scripts": {
-    "dev": "node --trace-warnings --unhandled-rejections=strict src/server.mjs"
+    "dev": "node --trace-warnings --unhandled-rejections=strict src/server.mjs",
+    "tmn:check": "node --check ./TMNOne.js",
+    "tmn:preflight": "node scripts/tmn-preflight.mjs",
+    "tmn:preflight:real": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/tmn-preflight-real.ps1"
   },
   "dependencies": {
     "axios": "^1.13.4",

@@ -7,6 +7,13 @@ function mustEnv(name) {
   return v;
 }
 
+function assertCoreCfg(cfg) {
+  const keyid = Number(cfg.keyid);
+  if (!Number.isFinite(keyid) || keyid <= 0 || !cfg.loginToken || !cfg.tmnId || !cfg.deviceId) {
+    throw new Error("TMN cfg missing: keyid/loginToken/tmnId/deviceId");
+  }
+}
+
 function validateRealEnv() {
   const missingOrInvalid = [];
   const keyid = process.env.TMNONE_KEYID;
@@ -28,13 +35,22 @@ function validateRealEnv() {
 
 async function main() {
   validateRealEnv();
+  const cfg = {
+    keyid: mustEnv("TMNONE_KEYID"),
+    msisdn: mustEnv("TMN_MSISDN"),
+    loginToken: mustEnv("TMN_LOGIN_TOKEN"),
+    tmnId: mustEnv("TMN_TMN_ID"),
+    deviceId: process.env.TMN_DEVICE_ID || "",
+  };
+  assertCoreCfg(cfg);
+
   const tmn = new TMNOne();
   tmn.setData(
-    mustEnv("TMNONE_KEYID"),
-    mustEnv("TMN_MSISDN"),
-    mustEnv("TMN_LOGIN_TOKEN"),
-    mustEnv("TMN_TMN_ID"),
-    process.env.TMN_DEVICE_ID || ""
+    cfg.keyid,
+    cfg.msisdn,
+    cfg.loginToken,
+    cfg.tmnId,
+    cfg.deviceId
   );
 
   if (process.env.PROXY_IP) {
@@ -50,6 +66,7 @@ async function main() {
     throw new Error("[TMN real] Empty signature (check KeyID/LoginToken pairing)");
   }
 
+  assertCoreCfg(cfg);
   const loginRes = await tmn.loginWithPin6(mustEnv("TMN_PIN6"));
   if (loginRes?.error) throw new Error(loginRes.error);
 

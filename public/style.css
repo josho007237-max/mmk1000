@@ -65,7 +65,7 @@ h3{font-size:clamp(16px,2.2vw,20px);font-weight:700}
 #statusBanner.error{border-color:rgba(227,84,73,.75);color:var(--accent)}
 #statusBanner.info{border-color:rgba(154,160,166,.35);color:var(--muted)}
 
-input,select{
+input,select,textarea{
   min-height:var(--tap);
   padding:10px 12px;
   font-size:16px;
@@ -75,6 +75,8 @@ input,select{
   color:var(--text);
 }
 input::placeholder{color:rgba(154,160,166,.7)}
+textarea::placeholder{color:rgba(154,160,166,.7)}
+textarea{width:100%;min-height:120px;resize:vertical}
 
 button{
   cursor:pointer;
@@ -200,4 +202,83 @@ td{overflow-wrap:anywhere}
   .row{flex-direction:column}
   input,select,button{width:100%}
   .card{padding:12px}
+}
+
+/* Login overlay */
+.login-overlay{
+  position:fixed;
+  inset:0;
+  width:100vw;
+  height:100vh;
+  background:rgba(0,0,0,0.86);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  z-index:2000;
+  pointer-events:auto;
+}
+.login-box{
+  position:relative;
+  background:#fff;
+  color:#111;
+  padding:18px;
+  border-radius:12px;
+  max-width:360px;
+  width:92%;
+  box-shadow:0 12px 38px rgba(0,0,0,.28);
+  z-index:2001;
+}
+.login-hint{
+  margin:0 0 10px;
+  padding:8px 10px;
+  border:1px solid #d7dbe3;
+  background:#f7f8fb;
+  border-radius:8px;
+  color:#394150;
+  font-size:13px;
+  line-height:1.4;
+}
+.login-pass-wrap{
+  display:flex;
+  align-items:center;
+  gap:8px;
+}
+.login-pass-wrap input{
+  flex:1 1 auto;
+  min-width:0;
+}
+.login-toggle-btn{
+  width:auto;
+  flex:0 0 auto;
+  min-width:70px;
+  min-height:40px;
+  padding:8px 10px;
+  border-radius:10px;
+  border:1px solid #d0d5dd;
+  background:#f5f7fa;
+  color:#101828;
+  font-size:14px;
+}
+.login-remember-row{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  margin:10px 0;
+  color:#344054;
+  font-size:13px;
+}
+.login-remember-row input{
+  width:16px;
+  height:16px;
+  min-height:16px;
+}
+.login-paste-btn{
+  width:100%;
+  min-height:40px;
+  padding:8px 10px;
+  border-radius:10px;
+  border:1px solid #d0d5dd;
+  background:#f8f9fb;
+  color:#101828;
+  font-size:13px;
 }

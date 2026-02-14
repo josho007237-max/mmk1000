@@ -1,8 +1,21 @@
+# dependencies
 node_modules/
+
+# runtime / data
+logs/
+data/
+*.log
+
+# secrets
 .env
 .env.*
 !.env.example
-data/
-*.log
-server-live.log
+
+# cloudflared / certs / credentials
+.cloudflared/
+*.pem
+*.pfx
+
+# OS junk
 .DS_Store
+Thumbs.db

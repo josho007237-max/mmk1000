@@ -1,6 +1,7 @@
 /* MMK1000 Panel client */
 
 const ADMIN_KEY_KEY = "mmk1000_admin_key";
+const REMEMBER_KEY  = "mmk1000_admin_remember";
 const TMN_CFG_KEY   = "mmk1000_tmn_cfg";
 const DEBUG_KEY     = "mmk1000_debug";
 const LAST_TAB_KEY  = "mmk1000_last_tab";
@@ -39,6 +40,23 @@ const I18N = {
     tmn_saved: "บันทึก TMN สำเร็จ ✅",
     tmn_cleared: "ล้าง TMN แล้ว",
     tmn_incomplete: "TMN ยังไม่ครบ: ต้องมี KEYID, MSISDN, LOGIN_TOKEN, TMN_ID, PIN6",
+    tmn_paste_label: "Paste block (KEY=VALUE หลายบรรทัด)",
+    tmn_apply_paste: "Apply Paste",
+    tmn_export_json: "Export config (.json)",
+    tmn_import_json: "Import config (.json)",
+    tmn_paste_empty: "กรุณาวาง KEY=VALUE ก่อน",
+    tmn_paste_no_keys: "ไม่พบคีย์ TMN ที่รองรับในข้อความที่วาง",
+    tmn_paste_applied: "นำค่า Paste เข้า TMN แล้ว ✅",
+    tmn_exported: "Export TMN config แล้ว ✅",
+    tmn_export_failed: "Export TMN config ไม่สำเร็จ",
+    tmn_imported: "Import TMN config แล้ว ✅",
+    tmn_import_failed: "Import TMN config ไม่สำเร็จ",
+    tmn_test_balance_btn: "ทดสอบโหมดจริง (Balance)",
+    tmn_test_loading: "กำลังทดสอบโหมดจริง...",
+    tmn_test_pass: "PASS: โหมดจริงพร้อมใช้งาน",
+    tmn_test_fail: "FAIL: ทดสอบโหมดจริงไม่ผ่าน",
+    tmn_test_relogin: "FAIL: ต้องทำ login/face ใหม่",
+    tmn_test_relogin_hint: "ต้องทำ login/face ใหม่ แล้วลองอีกครั้ง",
     choose_date: "กรุณาเลือกวันที่เริ่ม/สิ้นสุด",
     dashboard_loading: "กำลังโหลดแดชบอร์ด...",
     dashboard_ok: "แดชบอร์ดโหลดสำเร็จ ✅",
@@ -121,6 +139,23 @@ const I18N = {
     tmn_saved: "TMN saved ✅",
     tmn_cleared: "TMN cleared",
     tmn_incomplete: "TMN incomplete: KEYID, MSISDN, LOGIN_TOKEN, TMN_ID, PIN6 required",
+    tmn_paste_label: "Paste block (multi-line KEY=VALUE)",
+    tmn_apply_paste: "Apply Paste",
+    tmn_export_json: "Export config (.json)",
+    tmn_import_json: "Import config (.json)",
+    tmn_paste_empty: "Please paste KEY=VALUE first",
+    tmn_paste_no_keys: "No supported TMN keys found in pasted text",
+    tmn_paste_applied: "Pasted TMN values applied ✅",
+    tmn_exported: "TMN config exported ✅",
+    tmn_export_failed: "TMN config export failed",
+    tmn_imported: "TMN config imported ✅",
+    tmn_import_failed: "TMN config import failed",
+    tmn_test_balance_btn: "Test Real Mode (Balance)",
+    tmn_test_loading: "Testing real mode...",
+    tmn_test_pass: "PASS: real mode is ready",
+    tmn_test_fail: "FAIL: real mode test failed",
+    tmn_test_relogin: "FAIL: login/face is required",
+    tmn_test_relogin_hint: "Do login/face again, then retry",
     choose_date: "Please select start/end date",
     dashboard_loading: "Loading dashboard...",
     dashboard_ok: "Dashboard loaded ✅",
@@ -277,10 +312,58 @@ function headers(extra = {}) {
   return h;
 }
 
+function resolveFetchUrl(input) {
+  if (typeof input === "string") return input;
+  if (input && typeof input.url === "string") return input.url;
+  return "";
+}
+
+function isApiRequest(input) {
+  const raw = resolveFetchUrl(input);
+  if (!raw) return false;
+  if (raw.startsWith("/api/")) return true;
+  try {
+    const u = new URL(raw, location.origin);
+    return u.pathname.startsWith("/api/");
+  } catch {
+    return false;
+  }
+}
+
+function formatApiErrorMessage(err) {
+  const base = String(err?.message || err || "error");
+  const body = String(err?.bodyText || "").trim();
+  return body ? `${base} | ${body}` : base;
+}
+
+async function fetchApi(input, init) {
+  const res = await fetch(input, init);
+  if (!isApiRequest(input) || res.ok) return res;
+
+  let bodyText = "";
+  try {
+    bodyText = String(await res.clone().text() || "").trim();
+  } catch {}
+
+  const statusText = String(res.statusText || "").trim();
+  const statusLine = `HTTP ${res.status} ${statusText}`.trim();
+  const full = bodyText ? `${statusLine} | ${bodyText}` : statusLine;
+  const url = resolveFetchUrl(input);
+  console.error(`[api] ${url} -> ${full}`);
+  setBanner("error", full);
+  if ($("debugLogLine")) $("debugLogLine").textContent = `Last action: API fail ${full}`;
+
+  const err = new Error(statusLine);
+  err.status = res.status;
+  err.statusText = res.statusText;
+  err.bodyText = bodyText;
+  err.url = url;
+  throw err;
+}
+
 function isValidAdminKey(v) {
   const s = (v || "").trim();
-  // กันเคสหลุดอย่าง /queue, space, แปลกๆ
-  return /^[A-Za-z0-9._:-]{3,64}$/.test(s) && !s.includes("/");
+  return s.length >= 1;
 }
 
 function setAdminFieldState(state) {
@@ -298,6 +381,58 @@ function getAppJsVersion() {
   if (i < 0) return "-";
   const v = src.slice(i + 2).split("&")[0];
   return v || "-";
+}
+
+function isDevHostName(hostname) {
+  return hostname === "localhost" || hostname === "127.0.0.1";
+}
+
+function resolveDevHost() {
+  if (typeof window.__MMK_DEV_HOST__ === "boolean") return window.__MMK_DEV_HOST__;
+  return isDevHostName(location.hostname);
+}
+
+function resolveDisableSw(isDevHost) {
+  if (isDevHost) return true;
+  if (typeof window.__MMK_DISABLE_SW__ === "boolean") return window.__MMK_DISABLE_SW__;
+  return false;
+}
+
+async function unregisterSwAndClearCache() {
+  let swCount = 0;
+  let cacheCount = 0;
+  if ("serviceWorker" in navigator) {
+    const rs = await navigator.serviceWorker.getRegistrations();
+    swCount = rs.length;
+    await Promise.all(rs.map((r) => r.unregister()));
+  }
+  if ("caches" in window) {
+    const keys = await caches.keys();
+    cacheCount = keys.length;
+    await Promise.all(keys.map((k) => caches.delete(k)));
+  }
+  return { swCount, cacheCount };
+}
+
+function setupDevSwResetButton(isDevHost) {
+  const btn = $("devSwResetBtn");
+  if (!btn) return;
+  if (!isDevHost) {
+    btn.style.display = "none";
+    return;
+  }
+  btn.style.display = "";
+  btn.addEventListener("click", async () => {
+    btn.disabled = true;
+    try {
+      const r = await unregisterSwAndClearCache();
+      setBanner("ok", `Dev reset done: SW ${r.swCount}, cache ${r.cacheCount}`);
+    } catch (e) {
+      setBanner("error", `Dev reset failed: ${e?.message || e}`);
+    } finally {
+      btn.disabled = false;
+    }
+  });
 }
 
 function buildDebugBox(isDevHost) {
@@ -340,7 +475,7 @@ function buildDebugBox(isDevHost) {
   btnClear.textContent = "Clear Local Keys";
   btnClear.style.cssText = "padding:4px 8px; font-size:12px;";
   btnClear.addEventListener("click", () => {
-    localStorage.removeItem(ADMIN_KEY_KEY);
+    clearAll();
     localStorage.removeItem(TMN_CFG_KEY);
     location.reload();
   });
@@ -454,9 +589,16 @@ function buildDebugBox(isDevHost) {
 
 function refreshDebugBox() {
   const line = $("debugAdminKeyLine");
-  if (!line) return;
   const k = localStorage.getItem(ADMIN_KEY_KEY);
-  line.textContent = `adminKey exists?: ${k ? "true" : "false"}`;
+  if (line) line.textContent = `adminKey exists?: ${k ? "true" : "false"}`;
+  refreshAdminKeyStorageInfo();
+}
+
+function refreshAdminKeyStorageInfo() {
+  const line = $("adminKeyStorageInfo");
+  if (!line) return;
+  const hasStorageKey = !!(localStorage.getItem(ADMIN_KEY_KEY) || "").trim();
+  line.textContent = `Origin: ${location.origin} | key-in-storage: ${hasStorageKey ? "true" : "false"}`;
 }
 
 function setLang(nextLang) {
@@ -504,6 +646,11 @@ function applyI18nStatic() {
   setText('button[onclick="createWithdraw()"]', t("add_queue"));
   setText('button[onclick="loadQueue()"]', t("refresh_queue"));
   setText('button[onclick="decodeQrIntoWithdraw(this)"]', t("decode_btn"));
+  setText("#tmnPasteLabel", t("tmn_paste_label"));
+  setText("#tmn_apply_paste", t("tmn_apply_paste"));
+  setText("#tmn_export_json", t("tmn_export_json"));
+  setText("#tmn_import_json", t("tmn_import_json"));
+  setText("#tmn_test_balance", t("tmn_test_balance_btn"));
   setText("#tab-dashboard h3", `1) ${t("tab_dashboard")}`);
   setText("#tab-withdraw h3", `2) ${t("tab_withdraw")} ${LANG === "en" ? "(queue + approve)" : "(คิว + อนุมัติ)"}`);
   setText('#qTable thead th:nth-child(1)', t("status"));
@@ -516,14 +663,15 @@ function applyI18nStatic() {
   if ($("langEnBtn")) $("langEnBtn").textContent = t("lang_en");
 }
 
-async function verifyAdminKey(candidate) {
-  const key = (candidate || "").trim();
-  if (!key) return false;
+async function verifyAdminKey(pwd) {
+  pwd = (pwd || "").trim();
+  if (!pwd) return false;
   try {
-    const r = await fetch("/api/withdraw/queue", {
+    const r = await fetchApi("/api/withdraw/queue", {
       method: "GET",
-      headers: { "x-admin-key": sanitizeHeaderValue(key) }
+      headers: { "x-admin-key": pwd }
     });
+    console.log("[login] status", r.status);
     const j = await r.json().catch(() => null);
     return !!(r.ok && j?.ok);
   } catch {
@@ -535,12 +683,20 @@ async function showLoginModal() {
   if (document.getElementById("loginModal")) return true;
   const overlay = document.createElement("div");
   overlay.id = "loginModal";
-  overlay.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:9999;";
+  overlay.className = "login-overlay";
   overlay.innerHTML = `
-    <div style="background:#fff;padding:16px;border-radius:10px;max-width:360px;width:92%;box-shadow:0 10px 35px rgba(0,0,0,.2);">
+    <div class="login-box">
       <h3 style="margin:0 0 8px;">${t("login_title")}</h3>
       <div style="margin:0 0 10px;color:#555;">${t("login_desc")}</div>
-      <input id="loginPassword" type="password" placeholder="${t("login_placeholder")}" style="width:100%;padding:10px;border:1px solid #ddd;border-radius:8px;box-sizing:border-box;" />
+      <div class="login-hint">กรุณาวาง (paste) ADMIN KEY ให้ครบ</div>
+      <div class="login-pass-wrap">
+        <input id="loginPassword" type="password" placeholder="${t("login_placeholder")}" style="width:100%;padding:10px;border:1px solid #ddd;border-radius:8px;box-sizing:border-box;" />
+        <button id="loginTogglePwdBtn" type="button" class="login-toggle-btn">Show</button>
+      </div>
+      <label class="login-remember-row">
+        <input id="loginRememberAdmin" type="checkbox"> จำคีย์ในเครื่องนี้
+      </label>
+      <button id="loginPasteFromAdminBtn" type="button" class="login-paste-btn">วางคีย์จากช่อง ADMIN KEY ด้านหลัง</button>
       <div id="loginError" style="color:#b42318;min-height:20px;margin-top:8px;"></div>
       <button id="loginSubmitBtn" type="button" style="margin-top:6px;width:100%;">${t("login_submit")}</button>
     </div>
@@ -550,7 +706,12 @@ async function showLoginModal() {
   const input = $("loginPassword");
   const err = $("loginError");
   const submit = $("loginSubmitBtn");
-  if (input) input.value = (localStorage.getItem(ADMIN_KEY_KEY) || "").trim();
+  const togglePwdBtn = $("loginTogglePwdBtn");
+  const loginRemember = $("loginRememberAdmin");
+  const pasteFromAdminBtn = $("loginPasteFromAdminBtn");
+  if (!$("adminKey") && pasteFromAdminBtn) pasteFromAdminBtn.style.display = "none";
+  if (input) input.value = getAdminKey();
+  if (loginRemember) loginRemember.checked = localStorage.getItem(REMEMBER_KEY) === "1";
 
   const doLogin = async () => {
     const pwd = (input?.value || "").trim();
@@ -565,14 +726,33 @@ async function showLoginModal() {
       if (err) err.textContent = t("login_failed");
       return false;
     }
-    localStorage.setItem(ADMIN_KEY_KEY, pwd);
-    if ($("adminKey")) $("adminKey").value = pwd;
-    setAdminFieldState("ok");
+    const rememberThisDevice = !!loginRemember?.checked;
+    if (!saveAdminKey(pwd, rememberThisDevice)) {
+      if (err) err.textContent = t("admin_invalid");
+      return false;
+    }
     overlay.remove();
     return true;
   };
 
   submit?.addEventListener("click", doLogin);
+  togglePwdBtn?.addEventListener("click", () => {
+    if (!input) return;
+    const willShow = input.type === "password";
+    input.type = willShow ? "text" : "password";
+    togglePwdBtn.textContent = willShow ? "Hide" : "Show";
+    input.focus();
+  });
+  pasteFromAdminBtn?.addEventListener("click", () => {
+    const fromAdminField = ($("adminKey")?.value || "").trim();
+    if (!fromAdminField) {
+      if (err) err.textContent = "ไม่พบค่าในช่อง ADMIN KEY ด้านหลัง";
+      return;
+    }
+    if (input) input.value = fromAdminField;
+    if (err) err.textContent = "";
+    input?.focus();
+  });
   input?.addEventListener("keydown", async (e) => {
     if (e.key === "Enter") await doLogin();
   });
@@ -580,51 +760,87 @@ async function showLoginModal() {
   return false;
 }
 
-function logout() {
+function maskAdminKeyForLog(value) {
+  const s = (value || "").toString().trim();
+  return (s ? s.slice(0, 6) : "") + "...";
+}
+
+function getRememberChoice() {
+  const remember = $("rememberAdmin");
+  if (remember) return !!remember.checked;
+  return localStorage.getItem(REMEMBER_KEY) === "1";
+}
+
+function setRememberChoice(v) {
+  if ($("rememberAdmin")) $("rememberAdmin").checked = !!v;
+  if (v) localStorage.setItem(REMEMBER_KEY, "1");
+  else localStorage.removeItem(REMEMBER_KEY);
+}
+
+function clearAll() {
+  sessionStorage.removeItem(ADMIN_KEY_KEY);
   localStorage.removeItem(ADMIN_KEY_KEY);
+  localStorage.removeItem(REMEMBER_KEY);
   if ($("adminKey")) $("adminKey").value = "";
+  if ($("rememberAdmin")) $("rememberAdmin").checked = false;
   setAdminFieldState("");
+  refreshDebugBox();
+}
+
+function logout() {
+  clearAll();
   location.reload();
 }
 
 function getAdminKey() {
-  const v = ($("adminKey")?.value || "").trim();
-  return v || localStorage.getItem(ADMIN_KEY_KEY) || "";
+  const fromInput = ($("adminKey")?.value || "").trim();
+  if (fromInput) return fromInput;
+  return (localStorage.getItem(ADMIN_KEY_KEY) || "").trim();
 }
 
 function restoreAdminKey() {
   const saved = (localStorage.getItem(ADMIN_KEY_KEY) || "").trim();
-  if ($("adminKey") && saved) $("adminKey").value = saved;
-  if (saved && isValidAdminKey(saved)) setAdminFieldState("ok");
-}
-
-function persistAdminKeyIfPresent() {
-  const value = ($("adminKey")?.value || "").trim();
-  if (!value) return;
-  localStorage.setItem(ADMIN_KEY_KEY, value);
-  setAdminFieldState(isValidAdminKey(value) ? "ok" : "bad");
+  const remembered = (localStorage.getItem(REMEMBER_KEY) === "1");
+  if ($("adminKey")) $("adminKey").value = saved;
+  setRememberChoice(remembered);
+  if (saved) setAdminFieldState("ok");
+  else setAdminFieldState("");
   refreshDebugBox();
 }
 
-function saveAdminKey() {
-  const v = ($("adminKey")?.value || "").trim();
-  if (!v) return;
+function saveAdminKey(value, remember) {
+  const hasValueArg = arguments.length >= 1;
+  const hasRememberArg = arguments.length >= 2;
+  const v = ((hasValueArg ? value : $("adminKey")?.value) || "").trim();
+
+  if (!v) {
+    refreshDebugBox();
+    return false;
+  }
+
   if (!isValidAdminKey(v)) {
     setAdminFieldState("bad");
-    setBanner("error", t("admin_invalid"));
-    return;
+    if (!hasValueArg) setBanner("error", t("admin_invalid"));
+    refreshDebugBox();
+    return false;
   }
+
   localStorage.setItem(ADMIN_KEY_KEY, v);
+  const rememberChoice = hasRememberArg ? !!remember : getRememberChoice();
+  setRememberChoice(rememberChoice);
+  if ($("adminKey")) $("adminKey").value = v;
   setAdminFieldState("ok");
-  setBanner("ok", t("admin_saved"));
+  if (!hasValueArg) setBanner("ok", t("admin_saved"));
   refreshDebugBox();
+  return true;
 }
 
 function bindAdminKeyPersistence() {
   const input = $("adminKey");
   if (!input) return;
-  input.addEventListener("change", persistAdminKeyIfPresent);
-  input.addEventListener("blur", persistAdminKeyIfPresent);
+  input.addEventListener("change", () => saveAdminKey(input.value, getRememberChoice()));
+  input.addEventListener("blur", () => saveAdminKey(input.value, getRememberChoice()));
+  $("rememberAdmin")?.addEventListener("change", () => saveAdminKey(getAdminKey(), getRememberChoice()));
 }
 
 function mmkDebug() {
@@ -637,11 +853,42 @@ function mmkDebug() {
 
 async function pingHealth() {
   try {
-    const r = await fetch("/api/health", { method:"GET", headers: headers() });
+    const r = await fetchApi("/api/health", { method:"GET", headers: headers() });
     const t = await r.text();
     setBanner("info", `health: ${r.status} ${t}`);
   } catch (e) {
-    setBanner("error", `${t("health_error")}: ${e.message || e}`);
+    setBanner("error", `${t("health_error")}: ${formatApiErrorMessage(e)}`);
+  }
+}
+
+async function clearClientData() {
+  clearAll();
+  localStorage.removeItem(TMN_CFG_KEY);
+
+  if ("serviceWorker" in navigator) {
+    const regs = await navigator.serviceWorker.getRegistrations();
+    await Promise.all(regs.map((r) => r.unregister()));
+  }
+
+  if (window.caches) {
+    const keys = await caches.keys();
+    await Promise.all(keys.map((k) => caches.delete(k)));
+  }
+
+  location.reload();
+}
+
+async function testBalance() {
+  try {
+    const r = await fetchApi("/api/balance", { method: "GET", headers: headers() });
+    const data = await r.json().catch(() => null);
+    if (data?.ok) {
+      alert("PASS: balance ok");
+      return;
+    }
+    alert("FAIL: " + (data?.error || r.status));
+  } catch (e) {
+    alert("FAIL: " + formatApiErrorMessage(e));
   }
 }
 
@@ -655,10 +902,10 @@ function toggleDebug() {
 async function authCheck() {
   setBanner("info", t("auth_checking"));
   try {
-    const r = await fetch("/api/withdraw/queue", { headers: headers(), method:"GET" });
+    const r = await fetchApi("/api/withdraw/queue", { headers: headers(), method:"GET" });
     const j = await r.json().catch(() => null);
 
-    if (r.ok && j && j.ok) {
+    if (j && j.ok) {
       setAdminFieldState("ok");
       setBanner("ok", t("auth_ok"));
       return true;
@@ -668,15 +915,117 @@ async function authCheck() {
     return false;
   } catch (e) {
     setAdminFieldState("bad");
-    setBanner("error", `${t("auth_error")}: ${e.message || e}`);
+    setBanner("error", `${t("auth_error")}: ${formatApiErrorMessage(e)}`);
     return false;
   }
 }
 
 /* TMN Config */
+const TMN_FORM_FIELD_MAP = {
+  tmnone_keyid: "tmn_keyid",
+  tmn_msisdn: "tmn_msisdn",
+  tmn_login_token: "tmn_login_token",
+  tmn_tmn_id: "tmn_tmn_id",
+  tmn_device_id: "tmn_device_id",
+  tmn_pin6: "tmn_pin6",
+  proxy_ip: "tmn_proxy_ip",
+  proxy_user: "tmn_proxy_user",
+  proxy_pass: "tmn_proxy_pass"
+};
+
+const TMN_ALIAS_TO_KEY = {
+  TMNONE_KEYID: "tmnone_keyid",
+  TMN_KEYID: "tmnone_keyid",
+  TMN_MSISDN: "tmn_msisdn",
+  MSISDN: "tmn_msisdn",
+  TMN_LOGIN_TOKEN: "tmn_login_token",
+  LOGIN_TOKEN: "tmn_login_token",
+  TMN_TMN_ID: "tmn_tmn_id",
+  TMN_ID: "tmn_tmn_id",
+  TMN_DEVICE_ID: "tmn_device_id",
+  DEVICE_ID: "tmn_device_id",
+  TMN_PIN6: "tmn_pin6",
+  PIN6: "tmn_pin6",
+  PROXY_IP: "proxy_ip",
+  PROXY_USERNAME: "proxy_user",
+  PROXY_USER: "proxy_user",
+  PROXY_PASSWORD: "proxy_pass",
+  PROXY_PASS: "proxy_pass",
+};
+
+function emptyTmnCfg() {
+  const cfg = {};
+  for (const key of Object.keys(TMN_FORM_FIELD_MAP)) cfg[key] = "";
+  return cfg;
+}
+
+function normalizeTmnKey(inputKey) {
+  const key = (inputKey || "").toString().trim();
+  if (!key) return "";
+  return TMN_ALIAS_TO_KEY[key.toUpperCase()] || "";
+}
+
+function stripWrappingQuotes(value) {
+  const v = (value || "").toString().trim();
+  if (v.length >= 2 && ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'")))) {
+    return v.slice(1, -1);
+  }
+  return v;
+}
+
+function normalizeTmnCfg(raw) {
+  const out = {};
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return out;
+  for (const [rawKey, rawValue] of Object.entries(raw)) {
+    const key = normalizeTmnKey(rawKey);
+    if (!key) continue;
+    out[key] = stripWrappingQuotes(rawValue);
+  }
+  return out;
+}
+
+function parseTmnPasteBlock(block) {
+  const out = {};
+  const lines = String(block || "").split(/\r?\n/);
+  for (const rawLine of lines) {
+    let line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+    line = line.replace(/^export\s+/i, "").trim();
+    const eq = line.indexOf("=");
+    if (eq <= 0) continue;
+
+    const rawKey = line.slice(0, eq).trim();
+    const rawValue = line.slice(eq + 1).trim();
+    const key = normalizeTmnKey(rawKey);
+    if (!key) continue;
+    out[key] = stripWrappingQuotes(rawValue);
+  }
+  return out;
+}
+
+function readTmnCfgFromForm() {
+  const cfg = emptyTmnCfg();
+  for (const [key, id] of Object.entries(TMN_FORM_FIELD_MAP)) {
+    cfg[key] = ($(id)?.value || "").toString().trim();
+  }
+  return cfg;
+}
+
+function applyTmnCfgToForm(cfg) {
+  const normalized = normalizeTmnCfg(cfg);
+  const merged = { ...emptyTmnCfg(), ...normalized };
+  for (const [key, id] of Object.entries(TMN_FORM_FIELD_MAP)) {
+    if ($(id)) $(id).value = merged[key] || "";
+  }
+}
+
 function loadTmnCfg() {
-  try { return JSON.parse(localStorage.getItem(TMN_CFG_KEY) || "{}"); }
-  catch { return {}; }
+  try {
+    const raw = JSON.parse(localStorage.getItem(TMN_CFG_KEY) || "{}");
+    return { ...emptyTmnCfg(), ...normalizeTmnCfg(raw) };
+  } catch {
+    return emptyTmnCfg();
+  }
 }
 
 function isTmnCfgComplete(cfg) {
@@ -701,36 +1050,11 @@ function updateTmnButtonState() {
 }
 
 function fillTmnFormFromStorage() {
-  const cfg = loadTmnCfg();
-  const map = {
-    tmnone_keyid:"tmn_keyid",
-    tmn_msisdn:"tmn_msisdn",
-    tmn_login_token:"tmn_login_token",
-    tmn_tmn_id:"tmn_tmn_id",
-    tmn_device_id:"tmn_device_id",
-    tmn_pin6:"tmn_pin6",
-    proxy_ip:"tmn_proxy_ip",
-    proxy_user:"tmn_proxy_user",
-    proxy_pass:"tmn_proxy_pass"
-  };
-  for (const [k,id] of Object.entries(map)) {
-    if ($(id)) $(id).value = cfg[k] || "";
-  }
+  applyTmnCfgToForm(loadTmnCfg());
 }
 
 function saveTmnCfgFromForm() {
-  const v = (id) => ($ (id)?.value || "").toString().trim();
-  const cfg = {
-    tmnone_keyid: v("tmn_keyid"),
-    tmn_msisdn: v("tmn_msisdn"),
-    tmn_login_token: v("tmn_login_token"),
-    tmn_tmn_id: v("tmn_tmn_id"),
-    tmn_device_id: v("tmn_device_id"),
-    tmn_pin6: v("tmn_pin6"),
-    proxy_ip: v("tmn_proxy_ip"),
-    proxy_user: v("tmn_proxy_user"),
-    proxy_pass: v("tmn_proxy_pass")
-  };
+  const cfg = readTmnCfgFromForm();
 
   localStorage.setItem(TMN_CFG_KEY, JSON.stringify(cfg));
   updateTmnButtonState();
@@ -744,9 +1068,152 @@ function saveTmnCfgFromForm() {
   return true;
 }
 
+function setTmnTestStatus(ok, message) {
+  const el = $("tmnTestStatus");
+  if (!el) return;
+  el.textContent = message || "";
+  el.style.color = ok ? "#067647" : "#b42318";
+}
+
+function isReloginOrFaceError(message) {
+  const raw = String(message || "");
+  const s = raw.toLowerCase();
+  return (
+    /-428|face|biometric|session|expired|re-?login|log\s*in|login|reauth|verify|pin\/login/.test(s) ||
+    /ต้อง.*login|ต้อง.*เข้าสู่ระบบ|หมดอายุ|สแกนหน้า|ใบหน้า|ยืนยันตัวตน/.test(raw)
+  );
+}
+
+async function testRealModeBalance(btn) {
+  const saved = saveTmnCfgFromForm();
+  if (!saved) {
+    setTmnTestStatus(false, t("tmn_test_fail"));
+    return;
+  }
+
+  const today = new Date().toISOString().slice(0, 10);
+  const url = `/api/dashboard?start=${encodeURIComponent(today)}&end=${encodeURIComponent(today)}`;
+  setTmnTestStatus(false, t("tmn_test_loading"));
+  setBanner("info", t("tmn_test_loading"));
+  setButtonLoading(btn, true, t("tmn_test_loading"));
+
+  try {
+    const r = await fetchApi(url, { method: "GET", headers: headers() });
+    const j = await r.json().catch(() => null);
+
+    if (j?.ok) {
+      setTmnMode(j.TMN_MODE || j.tmn_mode || j.mode || "");
+      const passMsg = `${t("tmn_test_pass")} (balance ${fmtMoney(j.balance)})`;
+      setTmnTestStatus(true, passMsg);
+      setBanner("ok", passMsg);
+      return;
+    }
+
+    const rawMsg = String(j?.message || j?.error || `http_${r.status}`);
+    if (isReloginOrFaceError(rawMsg)) {
+      setTmnTestStatus(false, t("tmn_test_relogin"));
+      setBanner("error", `${t("tmn_test_relogin")} - ${t("tmn_test_relogin_hint")}`);
+      return;
+    }
+
+    const failMsg = `${t("tmn_test_fail")} (${r.status}) ${rawMsg}`;
+    setTmnTestStatus(false, failMsg);
+    setBanner("error", failMsg);
+  } catch (e) {
+    const rawMsg = formatApiErrorMessage(e);
+    if (isReloginOrFaceError(rawMsg)) {
+      setTmnTestStatus(false, t("tmn_test_relogin"));
+      setBanner("error", `${t("tmn_test_relogin")} - ${t("tmn_test_relogin_hint")}`);
+    } else {
+      const failMsg = `${t("tmn_test_fail")}: ${rawMsg}`;
+      setTmnTestStatus(false, failMsg);
+      setBanner("error", failMsg);
+    }
+  } finally {
+    setButtonLoading(btn, false);
+  }
+}
+
+function applyTmnPasteBlock() {
+  const block = ($("tmn_paste_block")?.value || "").toString();
+  if (!block.trim()) {
+    setBanner("error", t("tmn_paste_empty"));
+    return;
+  }
+
+  const parsed = parseTmnPasteBlock(block);
+  if (!Object.keys(parsed).length) {
+    setBanner("error", t("tmn_paste_no_keys"));
+    return;
+  }
+
+  const merged = { ...readTmnCfgFromForm(), ...parsed };
+  applyTmnCfgToForm(merged);
+  const ok = saveTmnCfgFromForm();
+  if (ok) setBanner("ok", t("tmn_paste_applied"));
+}
+
+function exportTmnCfgJson() {
+  try {
+    const cfg = readTmnCfgFromForm();
+    const payload = JSON.stringify(cfg, null, 2);
+    const blob = new Blob([payload], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `tmn-config-${stamp}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    setBanner("ok", t("tmn_exported"));
+  } catch (e) {
+    setBanner("error", `${t("tmn_export_failed")}: ${e.message || e}`);
+  }
+}
+
+function openTmnImportPicker() {
+  $("tmn_import_file")?.click();
+}
+
+function importTmnCfgFromFile(event) {
+  const input = event?.target;
+  const file = input?.files?.[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const parsed = JSON.parse(String(reader.result || ""));
+      const normalized = normalizeTmnCfg(parsed);
+      if (!Object.keys(normalized).length) {
+        throw new Error(t("tmn_paste_no_keys"));
+      }
+
+      const next = { ...emptyTmnCfg(), ...normalized };
+      applyTmnCfgToForm(next);
+      const ok = saveTmnCfgFromForm();
+      if (ok) setBanner("ok", t("tmn_imported"));
+    } catch (e) {
+      setBanner("error", `${t("tmn_import_failed")}: ${e.message || e}`);
+    } finally {
+      if (input) input.value = "";
+    }
+  };
+
+  reader.onerror = () => {
+    setBanner("error", `${t("tmn_import_failed")}: read_error`);
+    if (input) input.value = "";
+  };
+
+  reader.readAsText(file);
+}
+
 function clearTmnCfg() {
   localStorage.removeItem(TMN_CFG_KEY);
   fillTmnFormFromStorage();
+  if ($("tmn_paste_block")) $("tmn_paste_block").value = "";
   updateTmnButtonState();
   setBanner("info", t("tmn_cleared"));
 }
@@ -835,10 +1302,10 @@ async function loadDashboard() {
 
   try {
     const url = `/api/dashboard?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`;
-    const r = await fetch(url, { method:"GET", headers: headers() });
+    const r = await fetchApi(url, { method:"GET", headers: headers() });
     const j = await r.json().catch(() => null);
 
-    if (!r.ok || !j || !j.ok) {
+    if (!j || !j.ok) {
       setBanner("error", `${t("dashboard_fail")} (${r.status}) ${j?.message || j?.error || "error"}`);
       return;
     }
@@ -875,7 +1342,7 @@ async function loadDashboard() {
 
     setBanner("ok", t("dashboard_ok"));
   } catch (e) {
-    setBanner("error", `${t("dashboard_error")}: ${e.message || e}`);
+    setBanner("error", `${t("dashboard_error")}: ${formatApiErrorMessage(e)}`);
   }
 }
 
@@ -1000,21 +1467,21 @@ async function createWithdraw() {
     const payload = readWithdrawForm();
     setBanner("info", t("creating_queue"));
 
-    const r = await fetch("/api/withdraw/create", {
+    const r = await fetchApi("/api/withdraw/create", {
       method: "POST",
       headers: headers({ "content-type": "application/json" }),
       body: JSON.stringify(payload),
     });
     const j = await r.json().catch(() => null);
 
-    if (!r.ok || !j || !j.ok) {
+    if (!j || !j.ok) {
       setBanner("error", `${t("create_fail")} (${r.status}) ${j?.message || j?.error || "error"}`);
       return;
     }
     setBanner("ok", t("create_ok"));
     await loadQueue();
   } catch (e) {
-    setBanner("error", e.message || String(e));
+    setBanner("error", formatApiErrorMessage(e));
   }
 }
 
@@ -1045,22 +1512,26 @@ async function approve(id, btn) {
 
   if (!confirm(actionConfirmText(t("approve_action"), item))) return;
 
-  setBanner("info", t("approve_loading"));
-  setButtonLoading(btn, true, t("approve_loading"));
-  const r = await fetch(`/api/withdraw/${encodeURIComponent(id)}/approve`, {
-    method:"POST",
-    headers: headers({ "content-type":"application/json" }),
-    body: "{}"
-  });
-  const j = await r.json().catch(() => null);
-  if (!r.ok || !j || !j.ok) {
-    setBanner("error", `${t("approve_fail")} (${r.status}) ${j?.message || j?.error || "error"}`);
+  try {
+    setBanner("info", t("approve_loading"));
+    setButtonLoading(btn, true, t("approve_loading"));
+    const r = await fetchApi(`/api/withdraw/${encodeURIComponent(id)}/approve`, {
+      method:"POST",
+      headers: headers({ "content-type":"application/json" }),
+      body: "{}"
+    });
+    const j = await r.json().catch(() => null);
+    if (!j || !j.ok) {
+      setBanner("error", `${t("approve_fail")} (${r.status}) ${j?.message || j?.error || "error"}`);
+      return;
+    }
+    setBanner("ok", t("approve_ok"));
+    await loadQueue();
+  } catch (e) {
+    setBanner("error", `${t("approve_fail")}: ${formatApiErrorMessage(e)}`);
+  } finally {
     setButtonLoading(btn, false);
-    return;
   }
-  setBanner("ok", t("approve_ok"));
-  await loadQueue();
-  setButtonLoading(btn, false);
 }
 
 async function sendNow(id, btn) {
@@ -1080,97 +1551,105 @@ async function sendNow(id, btn) {
     }
   }
 
-  setBanner("info", t("send_loading"));
-  setButtonLoading(btn, true, t("send_loading"));
-  const r = await fetch(`/api/withdraw/${encodeURIComponent(id)}/send`, {
-    method:"POST",
-    headers: headers({ "content-type":"application/json" }),
-    body: "{}"
-  });
-  const j = await r.json().catch(() => null);
-  if (!r.ok || !j || !j.ok) {
-    setBanner("error", `${t("send_fail")} (${r.status}) ${j?.message || j?.error || "error"}`);
+  try {
+    setBanner("info", t("send_loading"));
+    setButtonLoading(btn, true, t("send_loading"));
+    const r = await fetchApi(`/api/withdraw/${encodeURIComponent(id)}/send`, {
+      method:"POST",
+      headers: headers({ "content-type":"application/json" }),
+      body: "{}"
+    });
+    const j = await r.json().catch(() => null);
+    if (!j || !j.ok) {
+      setBanner("error", `${t("send_fail")} (${r.status}) ${j?.message || j?.error || "error"}`);
+      return;
+    }
+    setBanner("ok", t("send_ok"));
+    await loadQueue();
+  } catch (e) {
+    setBanner("error", `${t("send_fail")}: ${formatApiErrorMessage(e)}`);
+  } finally {
     setButtonLoading(btn, false);
-    return;
   }
-  setBanner("ok", t("send_ok"));
-  await loadQueue();
-  setButtonLoading(btn, false);
 }
 
 async function loadQueue() {
-  setBanner("info", t("queue_loading"));
-  const r = await fetch("/api/withdraw/queue", { method:"GET", headers: headers() });
-  const j = await r.json().catch(() => null);
+  try {
+    setBanner("info", t("queue_loading"));
+    const r = await fetchApi("/api/withdraw/queue", { method:"GET", headers: headers() });
+    const j = await r.json().catch(() => null);
 
-  if (!r.ok || !j || !j.ok) {
-    setBanner("error", `${t("queue_fail")} (${r.status}) ${j?.message || j?.error || "error"}`);
-    return;
+    if (!j || !j.ok) {
+      setBanner("error", `${t("queue_fail")} (${r.status}) ${j?.message || j?.error || "error"}`);
+      return;
+    }
+
+    const items = Array.isArray(j.items) ? j.items : [];
+    LAST_QUEUE_MAP = new Map(items.map(x => [x.id, x]));
+
+    const tbody = $("qBody");
+    const cards = $("qCards");
+    if (tbody) tbody.innerHTML = "";
+    if (cards) cards.innerHTML = "";
+
+    items.forEach(it => {
+      const canApprove = (it.status === "pending");
+      const canSend    = (it.status === "approved");
+
+      // table row
+      if (tbody) {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${it.status}</td>
+          <td>${it.type}</td>
+          <td>${fmtMoney(it.amount)}</td>
+          <td>${destToText(it)}</td>
+          <td>
+            <button class="btn-approve" ${canApprove ? "" : "disabled"} onclick="approve('${it.id}', this)">${t("approve_btn")}</button>
+            <button class="btn-send" ${canSend ? "" : "disabled"} onclick="sendNow('${it.id}', this)">${t("send_btn")}</button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      }
+
+      // mobile card
+      if (cards) {
+        const div = document.createElement("div");
+        div.className = "q-card";
+        div.innerHTML = `
+          <div class="muted">id</div>
+          <div style="word-break:break-all;"><b>${it.id}</b></div>
+          <div class="row" style="margin-top:8px;">
+            <div style="flex:1;">
+          <div class="muted">${t("status")}</div>
+              <div>${it.status}</div>
+            </div>
+            <div style="flex:1;">
+              <div class="muted">${t("type")}</div>
+              <div>${it.type}</div>
+            </div>
+            <div style="flex:1;">
+              <div class="muted">${t("amount")}</div>
+              <div>${fmtMoney(it.amount)}</div>
+            </div>
+          </div>
+          <div style="margin-top:8px;">
+            <div class="muted">${t("dest")}</div>
+            <div>${destToText(it)}</div>
+          </div>
+          <div class="row" style="margin-top:10px;">
+            <button class="btn-approve" ${canApprove ? "" : "disabled"} onclick="approve('${it.id}', this)">${t("approve_btn")}</button>
+            <button class="btn-send" ${canSend ? "" : "disabled"} onclick="sendNow('${it.id}', this)">${t("send_btn")}</button>
+          </div>
+        `;
+        cards.appendChild(div);
+      }
+    });
+
+    setBanner("ok", `${t("queue_ok")} (${items.length} ${t("queue_items")})`);
+  } catch (e) {
+    setBanner("error", `${t("queue_fail")}: ${formatApiErrorMessage(e)}`);
   }
-
-  const items = Array.isArray(j.items) ? j.items : [];
-  LAST_QUEUE_MAP = new Map(items.map(x => [x.id, x]));
-
-  const tbody = $("qBody");
-  const cards = $("qCards");
-  if (tbody) tbody.innerHTML = "";
-  if (cards) cards.innerHTML = "";
-
-  items.forEach(it => {
-    const canApprove = (it.status === "pending");
-    const canSend    = (it.status === "approved");
-
-    // table row
-    if (tbody) {
-      const tr = document.createElement("tr");
-      tr.innerHTML = `
-        <td>${it.status}</td>
-        <td>${it.type}</td>
-        <td>${fmtMoney(it.amount)}</td>
-        <td>${destToText(it)}</td>
-        <td>
-          <button class="btn-approve" ${canApprove ? "" : "disabled"} onclick="approve('${it.id}', this)">${t("approve_btn")}</button>
-          <button class="btn-send" ${canSend ? "" : "disabled"} onclick="sendNow('${it.id}', this)">${t("send_btn")}</button>
-        </td>
-      `;
-      tbody.appendChild(tr);
-    }
-
-    // mobile card
-    if (cards) {
-      const div = document.createElement("div");
-      div.className = "q-card";
-      div.innerHTML = `
-        <div class="muted">id</div>
-        <div style="word-break:break-all;"><b>${it.id}</b></div>
-        <div class="row" style="margin-top:8px;">
-          <div style="flex:1;">
-        <div class="muted">${t("status")}</div>
-            <div>${it.status}</div>
-          </div>
-          <div style="flex:1;">
-            <div class="muted">${t("type")}</div>
-            <div>${it.type}</div>
-          </div>
-          <div style="flex:1;">
-            <div class="muted">${t("amount")}</div>
-            <div>${fmtMoney(it.amount)}</div>
-          </div>
-        </div>
-        <div style="margin-top:8px;">
-          <div class="muted">${t("dest")}</div>
-          <div>${destToText(it)}</div>
-        </div>
-        <div class="row" style="margin-top:10px;">
-          <button class="btn-approve" ${canApprove ? "" : "disabled"} onclick="approve('${it.id}', this)">${t("approve_btn")}</button>
-          <button class="btn-send" ${canSend ? "" : "disabled"} onclick="sendNow('${it.id}', this)">${t("send_btn")}</button>
-        </div>
-      `;
-      cards.appendChild(div);
-    }
-  });
-
-  setBanner("ok", `${t("queue_ok")} (${items.length} ${t("queue_items")})`);
 }
 
 /* QR decode into Withdraw */
@@ -1187,10 +1666,10 @@ async function decodeQrIntoWithdraw(btn) {
   fd.append("image", f);
 
   try {
-    const r = await fetch("/api/qr/decode", { method:"POST", headers: headers(), body: fd });
+    const r = await fetchApi("/api/qr/decode", { method:"POST", headers: headers(), body: fd });
     const j = await r.json().catch(() => null);
 
-    if (!r.ok || !j || !j.ok) {
+    if (!j || !j.ok) {
       setBanner("error", `${t("decode_fail")} (${r.status}) ${j?.message || j?.error || "error"}`);
       setButtonLoading(btn, false);
       return;
@@ -1226,7 +1705,7 @@ async function decodeQrIntoWithdraw(btn) {
     }
     setButtonLoading(btn, false);
   } catch (e) {
-    setBanner("error", `${t("decode_error")}: ${e.message || e}`);
+    setBanner("error", `${t("decode_error")}: ${formatApiErrorMessage(e)}`);
     setButtonLoading(btn, false);
   }
 }
@@ -1234,7 +1713,14 @@ async function decodeQrIntoWithdraw(btn) {
 /* init */
 function bindButtons() {
   $("tmn_save")?.addEventListener("click", saveTmnCfgFromForm);
+  $("tmn_test_balance")?.addEventListener("click", function () { testRealModeBalance(this); });
   $("tmn_clear")?.addEventListener("click", clearTmnCfg);
+  $("tmn_apply_paste")?.addEventListener("click", applyTmnPasteBlock);
+  $("tmn_export_json")?.addEventListener("click", exportTmnCfgJson);
+  $("tmn_import_json")?.addEventListener("click", openTmnImportPicker);
+  $("tmn_import_file")?.addEventListener("change", importTmnCfgFromFile);
+  $("btnClearClient")?.addEventListener("click", clearClientData);
+  $("btnTestBalance")?.addEventListener("click", testBalance);
 }
 
 function initDates() {
@@ -1272,7 +1758,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   applyI18nStatic();
   ensureSafeModeBanner();
   $("debugBtn").textContent = DEBUG ? t("debug_on_label") : t("debug_off_label");
-  const isDevHost = (location.hostname === "localhost" || location.hostname === "127.0.0.1");
+  const isDevHost = resolveDevHost();
+  const disableSw = resolveDisableSw(isDevHost);
+  setupDevSwResetButton(isDevHost);
 
   const modalClosedImmediately = await showLoginModal();
   if (!modalClosedImmediately) {
@@ -1305,25 +1793,13 @@ document.addEventListener("DOMContentLoaded", async () => {
   buildDebugBox(isDevHost);
 
   window.addEventListener("storage", (e) => {
-    if (e.key !== ADMIN_KEY_KEY) return;
-    const v = (e.newValue || "").trim();
-    if ($("adminKey") && v) $("adminKey").value = v;
-    if (v && isValidAdminKey(v)) setAdminFieldState("ok");
-    else if (v) setAdminFieldState("bad");
-    else setAdminFieldState("");
-    refreshDebugBox();
+    if (e.key !== ADMIN_KEY_KEY && e.key !== REMEMBER_KEY) return;
+    restoreAdminKey();
   });
 
-  if ("serviceWorker" in navigator && isDevHost) {
-    navigator.serviceWorker.getRegistrations()
-      .then(rs => rs.forEach(r => r.unregister()))
-      .catch(() => {});
-    if ("caches" in window) {
-      caches.keys().then(keys => Promise.all(keys.map(k => caches.delete(k))));
-    }
-    setBanner("info", "Dev: SW disabled");
-  }
-  if ("serviceWorker" in navigator && !isDevHost) {
+  if (disableSw) {
+    unregisterSwAndClearCache().catch(() => {});
+  } else if (!isDevHost && "serviceWorker" in navigator) {
     navigator.serviceWorker.register("/sw.js").catch(() => {});
   }
 });

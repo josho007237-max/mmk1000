@@ -43,6 +43,18 @@ function validateRealCfg(cfg) {
   }
 }
 
+function assertCoreCfg(cfg) {
+  const s = (v) => String(v ?? "").trim();
+  if (
+    s(cfg.keyid) === "" ||
+    s(cfg.loginToken) === "" ||
+    s(cfg.tmnId) === "" ||
+    s(cfg.deviceId) === ""
+  ) {
+    throw new Error("TMN cfg missing: keyid/loginToken/tmnId/deviceId");
+  }
+}
+
 function fingerprint(cfg) {
   return [
     cfg.keyid, cfg.msisdn, cfg.loginToken, cfg.tmnId, cfg.deviceId,
@@ -53,6 +65,7 @@ function fingerprint(cfg) {
 async function buildRealClient(cfgInput = {}) {
   const cfg = resolveCfg(cfgInput);
   validateRealCfg(cfg);
+  assertCoreCfg(cfg);
   const fp = fingerprint(cfg);
 
   if (tmnSingleton && preflightDone && fp === lastFingerprint) return tmnSingleton;
@@ -101,11 +114,13 @@ async function buildRealClient(cfgInput = {}) {
 async function ensureLogin(cfgInput = {}) {
   const cfg = resolveCfg(cfgInput);
   validateRealCfg(cfg);
+  assertCoreCfg(cfg);
   const fp = fingerprint(cfg);
   if (loggedIn && fp === lastFingerprint) return;
   if (!loginPromise) {
     loginPromise = (async () => {
       const tmn = await buildRealClient(cfg);
+      assertCoreCfg(cfg);
       const res = await tmn.loginWithPin6(cfg.pin6);
       if (res?.error) throw new Error(res.error);
       loggedIn = true;
@@ -157,6 +172,18 @@ export async function tmnSendTransfer(job, cfg) {
     const pin6 = resolveCfg(cfg).pin6;
     const r = await tmn.transferBankAC(job.dest.bank_code, job.dest.bank_ac, job.amount, pin6);
     return { ok: true, mode: "real", result: r };
+  }
+  if (job.type === "p2p") {
+    const to = job.dest?.proxy_value;
+    const r = await tmn.transferP2P(to, job.amount, job.note || "");
+    const draftTransactionId = r?.draft_transaction_id || r?.data?.draft_transaction_id;
+    return {
+      ok: true,
+      mode: "real",
+      kind: "p2p",
+      res: r,
+      ...(draftTransactionId ? { draft_transaction_id: draftTransactionId } : {}),
+    };
   }
   if (job.type === "promptpay") {
     const r = await tmn.transferQRPromptpay(job.dest.proxy_value, job.amount);

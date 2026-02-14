@@ -1,15 +1,30 @@
 import "dotenv/config";
 import TMNOne from "./TMNOne.js";
 
+function assertCoreCfg(cfg) {
+  const keyid = Number(cfg.keyid);
+  if (!Number.isFinite(keyid) || keyid <= 0 || !cfg.loginToken || !cfg.tmnId || !cfg.deviceId) {
+    throw new Error("TMN cfg missing: keyid/loginToken/tmnId/deviceId");
+  }
+}
+
+const cfg = {
+  keyid: process.env.TMNONE_KEYID || "",
+  msisdn: process.env.TMN_MSISDN || "",
+  loginToken: process.env.TMN_LOGIN_TOKEN || "",
+  tmnId: process.env.TMN_TMN_ID || "",
+  deviceId: process.env.TMN_DEVICE_ID || "",
+};
+assertCoreCfg(cfg);
+
 const tmn = new TMNOne();
-tmn.enableDebugging();
 
 tmn.setData(
-  process.env.TMNONE_KEYID,
-  process.env.TMN_MSISDN,
-  process.env.TMN_LOGIN_TOKEN,
-  process.env.TMN_TMN_ID,
-  process.env.TMN_DEVICE_ID
+  cfg.keyid,
+  cfg.msisdn,
+  cfg.loginToken,
+  cfg.tmnId,
+  cfg.deviceId
 );
 
 if (process.env.PROXY_IP) {
@@ -20,7 +35,13 @@ if (process.env.PROXY_IP) {
   );
 }
 
-await tmn.loginWithPin6(process.env.TMN_PIN6);
+assertCoreCfg(cfg);
+const loginRes = await tmn.loginWithPin6(process.env.TMN_PIN6 || "");
+if (loginRes?.error) {
+  throw new Error(loginRes.error);
+}
+const loginOk = typeof loginRes === "string" && loginRes.length > 0;
+console.log("login_ok=", loginOk, "token_len=", loginOk ? loginRes.length : 0);
 
 const balance = await tmn.getBalance();
 console.log("balance=", balance);

@@ -1,3 +1,7 @@
 {
-  "chatgpt.openOnStartup": true
+  "chatgpt.openOnStartup": true,
+  "cSpell.enabledFileTypes": {
+    "javascript": false,
+    "dotenv": true
+  }
 }

@@ -28,14 +28,26 @@ class TMNOne {
 
     constructor() {}
 
+    #normalizeKeyId(v) {
+        let s = String(v ?? '').trim();
+        s = s.replace(/^["']|["']$/g, '');
+        if (/^0x/i.test(s)) s = 'x' + s.slice(2);
+        return s;
+    }
+
+    #assertKeyIdFormat(k) {
+        if (!/^x[a-zA-Z0-9]+$/.test(k)) {
+            throw new Error('Invalid tmnone_keyid format (expected like x1234)');
+        }
+    }
+
     setData(tmnone_keyid, wallet_msisdn, wallet_login_token, wallet_tmn_id, wallet_device_id = '') {
-        this.#tmnone_keyid = tmnone_keyid;
+        const kid = this.#normalizeKeyId(tmnone_keyid);
+        this.#assertKeyIdFormat(kid);
+        this.#tmnone_keyid = kid;
         this.#wallet_msisdn = wallet_msisdn;
         this.#wallet_login_token = wallet_login_token;
         this.#wallet_tmn_id = wallet_tmn_id;
-        if (!wallet_device_id) {
-            wallet_device_id = crypto.createHash('sha256').update(wallet_msisdn).digest('hex');
-        }
         this.#wallet_device_id = wallet_device_id;
     }
 
@@ -46,7 +58,9 @@ class TMNOne {
     }
 
     setDataWithAccessToken(tmnone_keyid, wallet_access_token, wallet_login_token, wallet_device_id) {
-        this.#tmnone_keyid = tmnone_keyid;
+        const kid = this.#normalizeKeyId(tmnone_keyid);
+        this.#assertKeyIdFormat(kid);
+        this.#tmnone_keyid = kid;
         this.#wallet_access_token = wallet_access_token;
         this.#wallet_login_token = wallet_login_token;
         this.#wallet_device_id = wallet_device_id;
@@ -56,8 +70,17 @@ class TMNOne {
         this.#debugging = true;
     }
 
+    #assertCoreCfg() {
+        const kid = this.#normalizeKeyId(this.#tmnone_keyid);
+        this.#assertKeyIdFormat(kid);
+        if (!this.#wallet_login_token || !this.#wallet_tmn_id || !this.#wallet_device_id) {
+            throw new Error('TMN cfg missing: keyid/loginToken/tmnId/deviceId');
+        }
+    }
+
     async loginWithPin6(wallet_pin) {
         try {
+            this.#assertCoreCfg();
             await this.#getCachedAccessToken();
             if (this.#wallet_access_token) {
                 return this.#wallet_access_token;
@@ -68,6 +91,9 @@ class TMNOne {
             const uri = 'mobile-auth-service/v3/pin/login';
             const hashed_pin = crypto.createHash('sha256').update(this.#wallet_tmn_id + wallet_pin).digest('hex');
             const signature = await this.calculate_sign256(`/tmn-mobile-gateway/${uri}|${this.#wallet_login_token}|${this.#wallet_version}|${this.#wallet_device_id}|${hashed_pin}`);
+            if (!signature) {
+                throw new Error('signature empty');
+            }
             
             const postdata = {
                 device_id: this.#wallet_device_id,
@@ -119,7 +145,7 @@ class TMNOne {
                 await this.#uploadMetaData();
             }
         } catch (e) {
-            console.log(`Error: ${e.message} on line ${e.stack.split('\n')[1]}`);
+            this.#safeLog(`Error: ${e.message} on line ${e.stack.split('\n')[1]}`);
             return { error: e.message };
         }
         return this.#wallet_access_token;
@@ -252,7 +278,7 @@ class TMNOne {
                 
                 await fs.writeFile(cache_filename, data_to_write);
             } catch (e) {
-                console.warn(`Failed to write cache file ${cache_filename}: ${e.message}`);
+                this.#safeWarn(`Failed to write cache file ${cache_filename}: ${e.message}`);
             }
         }
         return wallet_response_body;
@@ -338,7 +364,7 @@ class TMNOne {
             }
             return wallet_response_body;
         } catch (e) {
-            console.log(`Error: ${e.message} on line ${e.stack.split('\n')[1]}`);
+            this.#safeLog(`Error: ${e.message} on line ${e.stack.split('\n')[1]}`);
             return { error: e.message };
         }
     }
@@ -433,7 +459,7 @@ class TMNOne {
             return wallet_response_body;
 
         } catch (e) {
-            console.log(`Error: ${e.message} on line ${e.stack.split('\n')[1]}`);
+            this.#safeLog(`Error: ${e.message} on line ${e.stack.split('\n')[1]}`);
             return { error: e.message };
         }
     }
@@ -524,7 +550,7 @@ class TMNOne {
             return wallet_response_body;
 
         } catch (e) {
-            console.log(`Error: ${e.message} on line ${e.stack.split('\n')[1]}`);
+            this.#safeLog(`Error: ${e.message} on line ${e.stack.split('\n')[1]}`);
             return { error: e.message };
         }
     }
@@ -620,7 +646,7 @@ class TMNOne {
             return wallet_response_body;
 
         } catch (e) {
-            console.log(`Error: ${e.message} on line ${e.stack.split('\n')[1]} (${e.lineNumber})`);
+            this.#safeLog(`Error: ${e.message} on line ${e.stack.split('\n')[1]} (${e.lineNumber})`);
             return { error: `${e.message} (line:${e.lineNumber})` };
         }
     }
@@ -686,7 +712,7 @@ class TMNOne {
                     this.#wallet_access_token = access_token;
                 }
             } catch (e) {
-                console.log(`Failed to decrypt cached token: ${e.message}`);
+                this.#safeLog(`Failed to decrypt cached token: ${e.message}`);
             }
         }
     }
@@ -782,7 +808,7 @@ class TMNOne {
             return wallet_response_body;
 
         } catch (e) {
-            console.log(`Error: ${e.message} on line ${e.stack.split('\n')[1]}`);
+            this.#safeLog(`Error: ${e.message} on line ${e.stack.split('\n')[1]}`);
             return { error: e.message };
         }
     }
@@ -868,7 +894,7 @@ class TMNOne {
             return wallet_response_body;
 
         } catch (e) {
-            console.log(`Error: ${e.message} on line ${e.stack.split('\n')[1]}`);
+            this.#safeLog(`Error: ${e.message} on line ${e.stack.split('\n')[1]}`);
             return { error: e.message };
         }
     }
@@ -941,15 +967,105 @@ class TMNOne {
         return wallet_response_body.code ? wallet_response_body : {};
     }
 
+    #maskSensitiveValue(val) {
+        if (val === undefined || val === null) return '';
+        const str = String(val);
+        if (!str) return '';
+        if (str.length <= 6) return '*'.repeat(str.length);
+        return `${str.slice(0, 3)}***${str.slice(-3)}`;
+    }
+
+    #redactSensitiveText(text) {
+        let out = String(text);
+        const kid = this.#normalizeKeyId(this.#tmnone_keyid);
+        const items = [kid, this.#wallet_login_token, this.#wallet_msisdn];
+        for (const it of items) {
+            if (!it) continue;
+            const raw = String(it);
+            out = out.split(raw).join(this.#maskSensitiveValue(raw));
+        }
+        return out;
+    }
+
+    #mask(val) {
+        if (val === null || val === undefined) return val;
+        if (typeof val === 'string') {
+            const str = String(val);
+            if (!str) return '';
+            if (str.length <= 8) return str;
+            return `${str.slice(0, 3)}***${str.slice(-3)}`;
+        }
+        if (typeof val === 'number' || typeof val === 'boolean') return val;
+        if (Array.isArray(val)) return val.map((v) => this.#mask(v));
+        if (val instanceof Error) {
+            return { message: this.#mask(val.message) };
+        }
+        if (typeof val === 'object') {
+            const sensitiveKeys = new Set([
+                'access_token',
+                'thai_id',
+                'date_of_birth',
+                'full_name',
+                'first_name_th',
+                'last_name_th',
+                'mobile_number',
+                'address_list',
+                'email'
+            ]);
+            const out = {};
+            for (const [k, v] of Object.entries(val)) {
+                if (sensitiveKeys.has(String(k).toLowerCase())) {
+                    out[k] = '[redacted]';
+                } else {
+                    out[k] = this.#mask(v);
+                }
+            }
+            return out;
+        }
+        return val;
+    }
+
+    #redactSensitiveAny(val) {
+        if (val === null || val === undefined) return val;
+        if (typeof val === 'string') return this.#redactSensitiveText(val);
+        if (typeof val === 'number' || typeof val === 'boolean') return val;
+        if (Array.isArray(val)) return val.map((v) => this.#redactSensitiveAny(v));
+        if (val instanceof Error) {
+            const out = new Error(this.#redactSensitiveText(val.message));
+            if (val.stack) out.stack = this.#redactSensitiveText(val.stack);
+            for (const key of Object.keys(val)) {
+                out[key] = this.#redactSensitiveAny(val[key]);
+            }
+            return out;
+        }
+        if (typeof val === 'object') {
+            const out = {};
+            for (const [k, v] of Object.entries(val)) {
+                out[k] = this.#redactSensitiveAny(v);
+            }
+            return out;
+        }
+        return val;
+    }
+
+    #safeLog(...args) {
+        console.log(...args.map((a) => this.#redactSensitiveAny(a)));
+    }
+
+    #safeWarn(...args) {
+        console.warn(...args.map((a) => this.#redactSensitiveAny(a)));
+    }
+
     #print_debugging(tag, message) {
         if (this.#debugging) {
-            console.log(`${tag}\t${message}`);
+            this.#safeLog(`${tag}\t${message}`);
         }
     }
 
     async #tmnone_connect(request_body_json) {
-        this.#print_debugging('tmnone_connect', `request_body = ${request_body_json}`);
         let response_body;
+        let target_url = this.#tmnone_endpoint;
+        let used_proxy_calc;
 
         const aes_key = crypto.createHash('sha512').update(this.#wallet_login_token).digest().slice(0, 32);
         const aes_iv = crypto.randomBytes(16);
@@ -964,16 +1080,66 @@ class TMNOne {
             const encrypted_payload = aes_iv.toString('hex') + encrypted_raw.toString('base64');
             const postData = JSON.stringify({ encrypted: encrypted_payload });
 
+            const kid = this.#normalizeKeyId(this.#tmnone_keyid);
+            this.#assertKeyIdFormat(kid);
             const headers = {
-                'X-KeyID': this.#tmnone_keyid,
+                'X-KeyID': kid,
                 'Content-Type': 'application/json',
-                'User-Agent': `okhttp/4.4.0/202601302100/${this.#tmnone_keyid}`
+                'User-Agent': `okhttp/4.4.0/202601302100/${kid}`
             };
 
-            const response = await axios.post(this.#tmnone_endpoint, postData, {
-                headers: headers,
-                timeout: 60000
+            const redact = (val) => {
+                if (val === undefined || val === null) return '';
+                const str = String(val);
+                if (!str) return '';
+                if (str.length <= 6) return '*'.repeat(str.length);
+                return `${str.slice(0, 3)}***${str.slice(-3)}`;
+            };
+            const safeProxyForLog = (proxyVal) => {
+                if (proxyVal === false) return false;
+                if (!proxyVal) return undefined;
+                if (typeof proxyVal === 'string') return redact(proxyVal);
+                const safe = { ...proxyVal };
+                if (safe.auth) {
+                    safe.auth = {
+                        username: redact(safe.auth.username),
+                        password: redact(safe.auth.password)
+                    };
+                }
+                return safe;
+            };
+
+            const proxyIpEnv = (process.env.PROXY_IP || '').trim();
+            const axiosConfig = { headers: headers, timeout: 60000 };
+            if (!proxyIpEnv) {
+                axiosConfig.proxy = false;
+            } else {
+                const proxyUrl = new URL(proxyIpEnv.startsWith('http') ? proxyIpEnv : `http://${proxyIpEnv}`);
+                axiosConfig.proxy = {
+                    protocol: proxyUrl.protocol.replace(':', ''),
+                    host: proxyUrl.hostname,
+                    port: parseInt(proxyUrl.port, 10),
+                };
+                if (proxyUrl.username || proxyUrl.password) {
+                    axiosConfig.proxy.auth = {
+                        username: proxyUrl.username,
+                        password: proxyUrl.password
+                    };
+                }
+            }
+            used_proxy_calc = axiosConfig.proxy;
+
+            this.#safeLog('tmnone_connect target_url:', target_url);
+            this.#safeLog('tmnone_connect env_proxy:', {
+                HTTP_PROXY: redact(process.env.HTTP_PROXY),
+                HTTPS_PROXY: redact(process.env.HTTPS_PROXY),
+                ALL_PROXY: redact(process.env.ALL_PROXY),
+                NO_PROXY: redact(process.env.NO_PROXY),
+                PROXY_IP: redact(process.env.PROXY_IP)
             });
+            this.#safeLog('tmnone_connect axios_proxy:', safeProxyForLog(axiosConfig.proxy));
+
+            const response = await axios.post(target_url, postData, axiosConfig);
 
             if (response.headers['x-wallet-user-agent']) {
                 this.#wallet_user_agent = response.headers['x-wallet-user-agent'];
@@ -993,11 +1159,22 @@ class TMNOne {
                 response_body = JSON.parse(decrypted_raw.toString('utf8'));
             }
 
-            this.#print_debugging('tmnone_connect', `response_body = ${JSON.stringify(response_body)}`);
+            const summary = {
+                code: this.#mask(response_body?.code),
+                success: this.#mask(response_body?.success),
+                message: this.#mask(response_body?.message)
+            };
+            this.#print_debugging('tmnone_connect', `response_summary = ${JSON.stringify(summary)}`);
 
         } catch (e) {
-            console.log(`Error: ${e.message} on line ${e.stack.split('\n')[1]}`);
-            return { error: e.message };
+            const http_status = e?.response?.status;
+            let data = e?.response?.data;
+            try { if (typeof data === 'string') data = JSON.parse(data); } catch {}
+            // ห้าม log request_body_json เพราะมี token/device/pin
+            this.#safeLog(`tmnone_connect error: ${e.message}`);
+            const target_url = e?.config?.url || target_url;
+            const used_proxy = e?.config?.proxy ?? used_proxy_calc;
+            return { error: e.message, http_status, data, axios_code: e?.code, target_url, used_proxy };
         }
         return response_body;
     }
@@ -1006,93 +1183,112 @@ class TMNOne {
         this.#print_debugging('wallet_connect', `headers = ${JSON.stringify(headers_array)}`);
         this.#print_debugging('wallet_connect', `request_body = ${request_body}`);
         let response_body;
+        let shield_retry_count = 0;
 
-        try {
-            const axios_headers = {};
-            headers_array.forEach(header => {
-                const parts = header.split(':');
-                const key = parts.shift().trim();
-                const value = parts.join(':').trim();
-                if (key && value) {
-                    axios_headers[key] = value;
-                }
-            });
-            axios_headers['User-Agent'] = this.#wallet_user_agent;
+        const axios_headers = {};
+        headers_array.forEach(header => {
+            const parts = header.split(':');
+            const key = parts.shift().trim();
+            const value = parts.join(':').trim();
+            if (key && value) {
+                axios_headers[key] = value;
+            }
+        });
+        axios_headers['User-Agent'] = this.#wallet_user_agent;
 
-            const config = {
-                url: `${this.#wallet_endpoint}${uri}`,
-                method: custom_method || (request_body ? 'POST' : 'GET'),
-                headers: axios_headers,
-                timeout: 60000,
-                transformResponse: [(data) => data]
+        const config = {
+            url: `${this.#wallet_endpoint}${uri}`,
+            method: custom_method || (request_body ? 'POST' : 'GET'),
+            headers: axios_headers,
+            timeout: 60000,
+            transformResponse: [(data) => data]
+        };
+
+        if (request_body) {
+            config.data = request_body;
+        }
+        
+        if (custom_method) {
+            config.method = custom_method;
+        }
+
+        if (this.#proxy_ip) {
+            const proxyUrl = new URL(this.#proxy_ip.startsWith('http') ? this.#proxy_ip : `http://${this.#proxy_ip}`);
+            config.proxy = {
+                protocol: proxyUrl.protocol.replace(':', ''),
+                host: proxyUrl.hostname,
+                port: parseInt(proxyUrl.port, 10),
             };
-
-            if (request_body) {
-                config.data = request_body;
-            }
-            
-            if (custom_method) {
-                config.method = custom_method;
-            }
-
-            if (this.#proxy_ip) {
-                const proxyUrl = new URL(this.#proxy_ip.startsWith('http') ? this.#proxy_ip : `http://${this.#proxy_ip}`);
-                config.proxy = {
-                    protocol: proxyUrl.protocol.replace(':', ''),
-                    host: proxyUrl.hostname,
-                    port: parseInt(proxyUrl.port, 10),
+            if (this.#proxy_username) {
+                config.proxy.auth = {
+                    username: this.#proxy_username,
+                    password: this.#proxy_password
                 };
-                if (this.#proxy_username) {
-                    config.proxy.auth = {
-                        username: this.#proxy_username,
-                        password: this.#proxy_password
-                    };
-                }
-            }
-            
-            const response = await axios(config);
-            
-            try {
-                response_body = JSON.parse(response.data);
-            } catch (json_e) {
-                response_body = response.data;
-            }
-
-            if (!response_body) {
-                return '';
-            }
-
-            if (response_body.code === 'MAS-401') {
-                const clear_cache_body = JSON.stringify({ scope: 'text_storage_obj', cmd: 'set', data: '' });
-                await this.#tmnone_connect(clear_cache_body);
-            }
-
-        } catch (e) {
-            if (e.response) {
-                try {
-                    response_body = JSON.parse(e.response.data);
-                } catch (json_e) {
-                    response_body = e.response.data;
-                }
-                
-                if (response_body.code === 'MAS-401') {
-                    const clear_cache_body = JSON.stringify({ scope: 'text_storage_obj', cmd: 'set', data: '' });
-                    await this.#tmnone_connect(clear_cache_body);
-                } else {
-                    console.log(`Error: ${e.message} on line ${e.stack.split('\n')[1]}`);
-                    return { error: e.message };
-                }
-            } else {
-                console.log(`Error: ${e.message} on line ${e.stack.split('\n')[1]}`);
-                return { error: e.message };
             }
         }
 
-        this.#print_debugging('wallet_connect', `response_body = ${JSON.stringify(response_body)}`);
+        while (true) {
+            try {
+                const response = await axios(config);
+                
+                try {
+                    response_body = JSON.parse(response.data);
+                } catch (json_e) {
+                    response_body = response.data;
+                }
+
+                if (!response_body) {
+                    return '';
+                }
+
+                if (response_body.code === 'MAS-401') {
+                    const clear_cache_body = JSON.stringify({ scope: 'text_storage_obj', cmd: 'set', data: '' });
+                    await this.#tmnone_connect(clear_cache_body);
+                }
+
+            } catch (e) {
+                if (e.response) {
+                    try {
+                        response_body = JSON.parse(e.response.data);
+                    } catch (json_e) {
+                        response_body = e.response.data;
+                    }
+                    const is_shield_expired = /shield_id is expired/i.test(String(response_body?.message || ''));
+                    
+                    if (response_body.code === 'MAS-401') {
+                        const clear_cache_body = JSON.stringify({ scope: 'text_storage_obj', cmd: 'set', data: '' });
+                        await this.#tmnone_connect(clear_cache_body);
+                    } else if (!is_shield_expired) {
+                        this.#safeLog(`Error: ${e.message} on line ${e.stack.split('\n')[1]}`);
+                        return { error: e.message };
+                    }
+                } else {
+                    this.#safeLog(`Error: ${e.message} on line ${e.stack.split('\n')[1]}`);
+                    return { error: e.message };
+                }
+            }
+
+            const is_shield_expired = /shield_id is expired/i.test(String(response_body?.message || ''));
+            if (is_shield_expired && shield_retry_count < 1) {
+                const new_shield_id = await this.#getShieldID();
+                this.#shield_id = new_shield_id;
+                config.headers['X-Shield-Session-Id'] = new_shield_id;
+                this.#safeLog('wallet_connect shield retry: expired shield_id');
+                shield_retry_count += 1;
+                continue;
+            }
+            break;
+        }
+
+        const summary = {
+            code: this.#mask(response_body?.code)
+        };
+        this.#print_debugging('wallet_connect', `response_summary = ${JSON.stringify(summary)}`);
         return response_body;
     }
 
     async calculate_sign256(data) {
+        this.#assertCoreCfg();
         const request_body = JSON.stringify({
             cmd: 'calculate_sign256',
             data: {
@@ -1102,7 +1298,17 @@ class TMNOne {
             }
         });
         const response = await this.#tmnone_connect(request_body);
-        return response.signature || '';
+        if (response?.error) {
+            const err = new Error('sign256 failed');
+            err.http_status = response.http_status;
+            err.data = response.data;
+            err.code = response.axios_code || response.http_status || '-';
+            throw err;
+        }
+        if (!response?.signature) {
+            throw new Error('sign256 failed: empty_signature');
+        }
+        return response.signature;
     }
 }
 
