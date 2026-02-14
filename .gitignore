@@ -19,3 +19,15 @@ data/
 # OS junk
 .DS_Store
 Thumbs.db
+# secrets
+.env
+.env.*
+!.env.example
+
+# runtime
+logs/
+data/
+*.log
+
+# node
+node_modules/
