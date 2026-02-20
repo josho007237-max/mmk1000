@@ -55,7 +55,7 @@ $pushOutput = (& git push -u origin HEAD:main 2>&1 | Out-String).Trim()
 $pushExit = $LASTEXITCODE
 $ErrorActionPreference = $oldEAP
 
-if ($pushExit -eq 0 -and $pushOutput) {
+if ($pushExit -eq 0) {
   Write-Host $pushOutput
 }
 
