@@ -339,6 +339,7 @@ function formatApiErrorMessage(err) {
   return body ? `${base} | ${body}` : base;
 }
 
+// use relative /api to avoid port mismatch
 async function fetchApi(input, init) {
   const res = await fetch(input, init);
   if (!isApiRequest(input) || res.ok) return res;
