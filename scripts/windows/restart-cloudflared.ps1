@@ -9,12 +9,12 @@ if (-not $isAdmin) {
 
 Restart-Service Cloudflared -Force
 
-$resp = curl.exe -s -i https://mmk1000.bn9.app/api/health
-$firstLine = (($resp -split "`r?`n") | Select-Object -First 1)
+$response = curl.exe -s -i https://mmk1000.bn9.app/api/health
+$firstLine = (($response -split "`r?`n") | Select-Object -First 1)
 $statusCode = ''
 if ($firstLine -match '^HTTP/\S+\s+(\d{3})') {
   $statusCode = $Matches[1]
 }
 
-Write-Host "status=$statusCode"
-Write-Host "$firstLine"
+Write-Host "status_code=$statusCode"
+Write-Host "first_line=$firstLine"
