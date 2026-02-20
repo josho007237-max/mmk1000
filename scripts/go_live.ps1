@@ -194,6 +194,9 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+$Port = if ([string]::IsNullOrWhiteSpace($env:PORT)) { 4101 } else { [int]$env:PORT }
+$LocalHealthUrl = "http://127.0.0.1:$Port/api/health"
+
 $failed = $false
 
 function Write-StepResult {
@@ -256,7 +259,7 @@ if (-not $nssm) { exit 1 }
 $localHealthBefore = Test-Health -Url $LocalHealthUrl
 Write-StepResult -Step "1.local-health-before" -Pass $localHealthBefore -Detail $LocalHealthUrl -Fix "Start web service manually: nssm start $WebServiceName"
 
-$envLine = "PORT=4101 DOTENV_CONFIG_PATH=$RepoDir\.env DOTENV_CONFIG_OVERRIDE=true DOTENV_CONFIG_QUIET=true"
+$envLine = "PORT=$Port DOTENV_CONFIG_PATH=$RepoDir\.env DOTENV_CONFIG_OVERRIDE=true DOTENV_CONFIG_QUIET=true"
 try {
   & $nssm set $WebServiceName AppEnvironmentExtra $envLine | Out-Null
   Write-StepResult -Step "2.set-web-env" -Pass $true -Detail $envLine -Fix "nssm set $WebServiceName AppEnvironmentExtra \"$envLine\""
