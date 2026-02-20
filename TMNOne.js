@@ -1337,11 +1337,10 @@ class TMNOne {
     }
 
     async #wallet_connect(uri, headers_array, request_body = '', custom_method = null) {
-        const SHIELD_EXPIRED_TEXT = 'shield_id is expired';
         const hasShieldExpiredMessage = (b) => {
             if (!b || typeof b !== 'object') return false;
-            const msg = String(b?.message ?? '').trim().toLowerCase();
-            return msg.includes(SHIELD_EXPIRED_TEXT);
+            const msg = String(b?.message ?? '');
+            return /shield/i.test(msg) && /expired/i.test(msg);
         };
         let did_retry_shield = false;
         this.#print_debugging('wallet_connect', `headers_count = ${(headers_array || []).length}`);
