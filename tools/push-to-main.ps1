@@ -1,20 +1,6 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-
-$linuxLikeCommands = @('uname', 'ls', 'head', 'sed')
-if ($args.Count -gt 0) {
-  $firstArg = [string]$args[0]
-  $isLinuxLike = $linuxLikeCommands -contains $firstArg
-  if (-not $isLinuxLike -and $firstArg -eq 'echo' -and $args.Count -gt 1 -and [string]$args[1] -eq '$PATH') {
-    $isLinuxLike = $true
-  }
-  if ($isLinuxLike) {
-    Write-Host 'ใช้คำสั่ง PowerShell แทน'
-    exit 2
-  }
-}
-
 if ($args -contains '--selftest') {
   $tokens = $null
   $errors = $null
@@ -49,18 +35,12 @@ if ($emails) {
   }
 }
 
-$oldEAP = $ErrorActionPreference
-$ErrorActionPreference = 'Continue'
-$pushOutput = (& git push -u origin HEAD:main 2>&1 | Out-String).Trim()
-$pushExit = $LASTEXITCODE
-$ErrorActionPreference = $oldEAP
+$pushOutput = git push -u origin HEAD:main 2>&1
+$pushExitCode = $LASTEXITCODE
+$pushOutput | ForEach-Object { Write-Host $_ }
 
-if ($pushExit -eq 0) {
-  Write-Host $pushOutput
-}
-
-if ($pushExit -ne 0) {
-  $pushText = $pushOutput
+if ($pushExitCode -ne 0) {
+  $pushText = ($pushOutput | Out-String)
   if ($pushText -match 'non-fast-forward' -or $pushText -match '\[rejected\]' -or $pushText -match 'fetch first') {
     Write-Host 'Push rejected (non-fast-forward). Try:' -ForegroundColor Yellow
     Write-Host 'git push origin HEAD:main --force-with-lease' -ForegroundColor Yellow
