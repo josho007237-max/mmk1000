@@ -706,7 +706,7 @@ adminApi.post("/withdraw/:id/send", requireFullAdmin, async (req, res) => {
         hint: "ต้องอัปเดต key/session ให้ตรงกัน",
       });
     }
-    if (!r?.ok || r?.result?.error) {
+    if (!r?.ok || r?.result?.error || r?.error) {
       const failPayload = r || { error: "tmn_transfer_failed", detail: "empty transfer response" };
       const detail = r?.result?.error || r?.error || r?.message || r?.result?.message || "transfer failed";
       const saved = await markWithdrawalResult(job.id, "failed", failPayload);
