@@ -28,3 +28,17 @@ node_modules/
 data/admin-keys*.txt
 data/withdraw-queue.json
 data/withdraw-queue*.bak*
+
+# harden cleanup patterns for post-push hygiene
+**/cloudflared/
+**/*admin-keys*
+**/*withdraw-queue*
+
+# review follow-up: precise nested sensitive patterns
+**/.cloudflared/
+**/admin-keys*.txt
+**/withdraw-queue*.json*
+*.bak
+scripts/*.bak*
+*.pem
+*credential*.json
