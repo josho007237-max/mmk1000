@@ -1,21 +1,30 @@
-# dependencies
 node_modules/
-
-# runtime / data
 logs/
-data/
-*.log
-
-# secrets
 .env
 .env.*
-!.env.example
+*.log
 
-# cloudflared / certs / credentials
+# cloudflared creds/config (อย่าอัป)
 .cloudflared/
-*.pem
-*.pfx
+**/.cloudflared/
 
-# OS junk
+# local data ที่มีข้อมูลจริง (เลือกกันไว้ก่อน)
+data/withdraw-queue.json
+data/*.json
+
+# OS/Editor
 .DS_Store
 Thumbs.db
+.vscode/
+# secrets / local runtime
+.env
+.env.*
+logs/
+node_modules/
+.cloudflared/
+**/.cloudflared/
+
+# sensitive app data (do not commit)
+data/admin-keys*.txt
+data/withdraw-queue.json
+data/withdraw-queue*.bak*
