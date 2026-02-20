@@ -1340,7 +1340,8 @@ class TMNOne {
         const SHIELD_EXPIRED_TEXT = 'shield_id is expired';
         const hasShieldExpiredMessage = (b) => {
             if (!b || typeof b !== 'object') return false;
-            return String(b?.message ?? '').toLowerCase().includes(SHIELD_EXPIRED_TEXT);
+            const msg = String(b?.message ?? '').trim().toLowerCase();
+            return msg.includes(SHIELD_EXPIRED_TEXT);
         };
         let did_retry_shield = false;
         this.#print_debugging('wallet_connect', `headers_count = ${(headers_array || []).length}`);
