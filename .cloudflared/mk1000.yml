@@ -1,0 +1,4 @@
+ingress:
+  - hostname: mmk1000.bn9.app
+    service: http://127.0.0.1:4101
+  - service: http_status:404

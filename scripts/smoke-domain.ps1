@@ -1,8 +1,7 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$url = 'https://mmk1000.bn9.app/api/health'
-$out = & curl.exe -S -v -i --ssl-no-revoke --connect-timeout 5 --max-time 15 $url 2>&1
+$out = & curl.exe -S -v -i --ssl-no-revoke --connect-timeout 5 --max-time 15 https://mmk1000.bn9.app/api/health 2>&1
 $curlExitCode = $LASTEXITCODE
 
 # Keep non-silent behavior: print curl output (stdout/stderr) without app secrets handling.
