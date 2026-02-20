@@ -42,7 +42,3 @@ data/withdraw-queue*.bak*
 scripts/*.bak*
 *.pem
 *credential*.json
-# backups (avoid accidental secret leaks)
-scripts/*.bak*
-*.bak
-*~
