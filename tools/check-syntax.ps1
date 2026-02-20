@@ -1,40 +1,33 @@
-# tools/check-syntax.ps1
-$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+$ErrorActionPreference = "Continue"
 
-# repo root = parent of /tools
 $ROOT = Split-Path -Parent $PSScriptRoot
-
-# sanity: node exists
-$node = Get-Command node -ErrorAction Stop
-Write-Host ("node: " + (& node -v))
+$null = Get-Command node -ErrorAction Stop
 
 $targets = @()
-$targets += Get-ChildItem (Join-Path $ROOT "src") -Filter *.mjs -File -ErrorAction SilentlyContinue
-$targets += Get-Item (Join-Path $ROOT "public\app.js") -ErrorAction SilentlyContinue
-
-if (-not $targets -or $targets.Count -eq 0) {
-  Write-Host "[FAIL] no target files found (src/*.mjs, public/app.js)" -ForegroundColor Red
-  exit 1
-}
+$targets += Get-ChildItem (Join-Path $ROOT "src") -Filter *.mjs -File -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }
+$targets += (Join-Path $ROOT "public\app.js")
+$targets += (Join-Path $ROOT "TMNOne.js")
 
 $passCount = 0
 $failCount = 0
+
+Write-Host "=== Syntax check (node --check) ==="
 foreach ($f in $targets) {
-  try {
-    & node --check $f.FullName | Out-Null
-    Write-Host ("[OK]   " + $f.FullName)
+  node --check $f *> $null
+  if ($LASTEXITCODE -eq 0) {
+    Write-Host ("PASS  " + $f) -ForegroundColor Green
     $passCount++
-  } catch {
+  } else {
+    Write-Host ("FAIL  " + $f) -ForegroundColor Red
     $failCount++
-    Write-Host ("[FAIL] " + $f.FullName) -ForegroundColor Red
-    Write-Host ("       " + $_.Exception.Message) -ForegroundColor Red
   }
 }
 
 if ($failCount -gt 0) {
-  Write-Host ("[FAIL] syntax check failed. pass={0} fail={1}" -f $passCount, $failCount) -ForegroundColor Red
+  Write-Host ("Result: FAIL (pass={0} fail={1})" -f $passCount, $failCount) -ForegroundColor Red
   exit 1
 }
 
-Write-Host ("[PASS] syntax check passed. pass={0} fail={1}" -f $passCount, $failCount) -ForegroundColor Green
+Write-Host ("Result: PASS (pass={0} fail={1})" -f $passCount, $failCount) -ForegroundColor Green
 exit 0

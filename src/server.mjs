@@ -549,11 +549,14 @@ adminApi.post("/withdraw/:id/send", requireFullAdmin, async (req, res) => {
       logWithdrawSend(job.status, false, "PREFLIGHT_REQUIRED");
       return sendErr(res, 400, "PREFLIGHT_REQUIRED");
     }
-    const type = String(job?.type || "");
+    const typeRaw = String(job?.type || "");
+    const type = typeRaw === "p2p" ? "wallet" : typeRaw;
+    if (typeRaw === "p2p") {
+      job = { ...job, type: "wallet" };
+    }
     const sourceMsisdn = String(process.env.TMN_MSISDN ?? "").replace(/\D/g, "");
     const p2pProxy = String(job?.dest?.proxy_value ?? "").replace(/\D/g, "");
     const sameAsSource =
-      type === "p2p" &&
       p2pProxy !== "" &&
       sourceMsisdn !== "" &&
       p2pProxy === sourceMsisdn;
@@ -569,31 +572,29 @@ adminApi.post("/withdraw/:id/send", requireFullAdmin, async (req, res) => {
     const rid = String(req.get("x-request-id") || req.get("x-rid") || "");
     console.log(`withdraw_send id=${job.id} type=${type} trace=${rid}`);
 
-    if (type === "p2p") {
-      if (!/^\d{10}$/.test(p2pProxy)) {
-        try {
-          await markWithdrawalResult(job.id, "failed", {
-            error: "p2p_dest_invalid",
-            hint: "เบอร์ปลายทางต้องเป็น 10 หลัก",
-            at: Date.now(),
-          });
-        } catch {}
-        console.log(`withdraw_send_fail id=${job.id} error=p2p_dest_invalid`);
-        logWithdrawSend("failed", false, "p2p_dest_invalid");
-        return sendErr(res, 400, "p2p_dest_invalid");
-      }
-      if (sameAsSource) {
-        try {
-          await markWithdrawalResult(job.id, "failed", {
-            error: "dest_same_as_source",
-            hint: "ปลายทางห้ามเป็นเบอร์เดียวกับต้นทาง",
-            at: Date.now(),
-          });
-        } catch {}
-        console.log(`withdraw_send_fail id=${job.id} error=dest_same_as_source`);
-        logWithdrawSend("failed", false, "dest_same_as_source");
-        return sendErr(res, 400, "dest_same_as_source");
-      }
+    if (typeRaw === "p2p" && !/^\d{10}$/.test(p2pProxy)) {
+      try {
+        await markWithdrawalResult(job.id, "failed", {
+          error: "p2p_dest_invalid",
+          hint: "เบอร์ปลายทางต้องเป็น 10 หลัก",
+          at: Date.now(),
+        });
+      } catch {}
+      console.log(`withdraw_send_fail id=${job.id} error=p2p_dest_invalid`);
+      logWithdrawSend("failed", false, "p2p_dest_invalid");
+      return sendErr(res, 400, "p2p_dest_invalid");
+    }
+    if (sameAsSource) {
+      try {
+        await markWithdrawalResult(job.id, "failed", {
+          error: "dest_same_as_source",
+          hint: "ปลายทางห้ามเป็นเบอร์เดียวกับต้นทาง",
+          at: Date.now(),
+        });
+      } catch {}
+      console.log(`withdraw_send_fail id=${job.id} error=dest_same_as_source`);
+      logWithdrawSend("failed", false, "dest_same_as_source");
+      return sendErr(res, 400, "dest_same_as_source");
     }
     if (type === "wallet") {
       const widDigits = String(job?.dest?.wallet_id || "").replace(/\D/g, "");
@@ -705,7 +706,7 @@ adminApi.post("/withdraw/:id/send", requireFullAdmin, async (req, res) => {
         hint: "ต้องอัปเดต key/session ให้ตรงกัน",
       });
     }
-    if (!r || r?.ok !== true || r?.result?.error || r?.error) {
+    if (!r?.ok || r?.result?.error) {
       const failPayload = r || { error: "tmn_transfer_failed", detail: "empty transfer response" };
       const detail = r?.result?.error || r?.error || r?.message || r?.result?.message || "transfer failed";
       const saved = await markWithdrawalResult(job.id, "failed", failPayload);
