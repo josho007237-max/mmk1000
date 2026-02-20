@@ -8,6 +8,7 @@ const QUEUE_FILE = path.join(DATA_DIR, "withdraw-queue.json");
 export const WITHDRAW_STORE = "withdraw.store.mjs";
 export const WITHDRAW_STORAGE_TYPE = "file";
 export const WITHDRAW_STORAGE_PATH = QUEUE_FILE;
+const jobLocks = new Set();
 
 export async function ensureDataDir() {
   await fs.mkdir(DATA_DIR, { recursive: true });
@@ -29,10 +30,30 @@ async function writeAll(data) {
 
 export async function backupWithdrawQueue() {
   await ensureDataDir();
-  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const backupFile = path.join(DATA_DIR, `withdraw-queue.bak-${timestamp}.json`);
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  const timestamp =
+    String(d.getFullYear()) +
+    pad(d.getMonth() + 1) +
+    pad(d.getDate()) +
+    "-" +
+    pad(d.getHours()) +
+    pad(d.getMinutes()) +
+    pad(d.getSeconds());
+  const backupFile = path.join(DATA_DIR, `withdraw-queue.${timestamp}.bak.json`);
   await fs.copyFile(QUEUE_FILE, backupFile);
   return backupFile;
+}
+
+export function tryLock(id) {
+  const key = String(id || "");
+  if (jobLocks.has(key)) return false;
+  jobLocks.add(key);
+  return true;
+}
+
+export function unlock(id) {
+  jobLocks.delete(String(id || ""));
 }
 
 export async function listWithdrawals() {
@@ -49,8 +70,10 @@ function validateCreate(body) {
   const amount = Number(body.amount);
   if (!Number.isFinite(amount) || amount <= 0) throw new Error("bad_amount");
 
-  const type = body.type;
-  if (!["bank","promptpay","wallet","p2p"].includes(type)) throw new Error("bad_type");
+  let type = body.type;
+  // Normalize alias: p2p -> wallet (same TMN API path)
+  if (type === "p2p") type = "wallet";
+  if (!["bank","promptpay","wallet"].includes(type)) throw new Error("bad_type");
 
   const dest = body.dest || {};
   if (type === "bank") {
@@ -58,13 +81,19 @@ function validateCreate(body) {
   }
   if (type === "promptpay") {
     if (!dest.proxy_value) throw new Error("promptpay_dest_missing");
+    const digits = String(dest.proxy_value).replace(/\D/g, "");
+    if (!(digits.length === 10 || digits.length === 13 || digits.length === 15)) {
+      throw new Error("promptpay_dest_invalid");
+    }
+    dest.proxy_value = digits;
   }
   if (type === "wallet") {
     if (!dest.wallet_id) throw new Error("wallet_dest_missing");
+    const digits = String(dest.wallet_id).replace(/\D/g, "");
+    if (digits.length !== 10) throw new Error("wallet_dest_invalid");
+    dest.wallet_id = digits;
   }
-  if (type === "p2p") {
-    if (!dest.proxy_value) throw new Error("p2p_dest_missing");
-  }
+  // p2p is normalized to wallet (10-digit phone), enforce same dest rules as wallet
 
   return { type, amount, dest, note: body.note || "" };
 }
@@ -91,6 +120,7 @@ export async function approveWithdrawal(id) {
   if (!job) throw new Error("not_found");
   if (job.status !== "pending") throw new Error("not_pending");
 
+  await backupWithdrawQueue();
   job.status = "approved";
   job.approved_at = Date.now();
 
@@ -104,9 +134,41 @@ export async function markWithdrawalResult(id, status, result) {
   if (!job) throw new Error("not_found");
   if (job.status === "sent") throw new Error("already_sent");
 
+  if (job.status === "approved" && (status === "sent" || status === "failed")) {
+    await backupWithdrawQueue();
+  }
+  if (status === "sent") {
+    const hasOkTrue =
+      result?.ok === true ||
+      result?.success === true ||
+      result?.result?.ok === true ||
+      result?.result?.success === true;
+    if (!hasOkTrue) {
+      if (result && typeof result === "object" && !Array.isArray(result)) {
+        result.ok = true;
+        if (result.mock === true && !Object.prototype.hasOwnProperty.call(result, "mode")) {
+          result.mode = "mock";
+        }
+      } else {
+        result = { result, ok: true };
+      }
+    }
+  }
   job.status = status; // sent | failed
   job.sent_at = Date.now();
   job.result = result;
+  if (status === "sent" || status === "failed") {
+    const okFlag = Boolean(
+      result?.ok === true ||
+      result?.success === true ||
+      result?.result?.ok === true ||
+      result?.result?.success === true
+    );
+    const mockFlag = Boolean(result?.mock === true || result?.result?.mock === true);
+    console.log(
+      `withdraw_mark id=${job.id} type=${String(job.type || "")} amount=${Number(job.amount || 0)} status=${status} mock=${mockFlag} ok=${okFlag}`
+    );
+  }
 
   await writeAll(db);
   return job;

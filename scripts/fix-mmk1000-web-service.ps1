@@ -13,6 +13,7 @@ $ExpectedAppDirectory = "C:\Users\ADMIN\MMK1000"
 $ExpectedAppParameters = "src\server.mjs"
 $ExpectedStdout = "C:\Users\ADMIN\MMK1000\logs\web.out.log"
 $ExpectedStderr = "C:\Users\ADMIN\MMK1000\logs\web.err.log"
+$ExpectedAppRotation = "1"
 $Port = 4100
 $StartTimeoutSec = 30
 $StopTimeoutSec = 30
@@ -187,7 +188,7 @@ if (-not (Test-Path -LiteralPath $nssm -PathType Leaf)) {
 Write-Host ("Using NSSM from service ImagePath only: {0}" -f $nssm)
 
 Write-Section "3) Read current config with nssm get"
-$keys = @("Application", "AppDirectory", "AppParameters", "AppStdout", "AppStderr")
+$keys = @("Application", "AppDirectory", "AppParameters", "AppStdout", "AppStderr", "AppRotation")
 foreach ($key in $keys) {
   $value = Get-NssmValue -NssmPath $nssm -Name $ServiceName -Key $key
   Write-Host ("nssm get {0} {1} => {2}" -f $ServiceName, $key, $value)
@@ -214,6 +215,7 @@ Set-NssmValueIfNeeded -NssmPath $nssm -Name $ServiceName -Key "AppDirectory" -Ex
 Set-NssmValueIfNeeded -NssmPath $nssm -Name $ServiceName -Key "AppParameters" -ExpectedValue $ExpectedAppParameters
 Set-NssmValueIfNeeded -NssmPath $nssm -Name $ServiceName -Key "AppStdout" -ExpectedValue $ExpectedStdout
 Set-NssmValueIfNeeded -NssmPath $nssm -Name $ServiceName -Key "AppStderr" -ExpectedValue $ExpectedStderr
+Set-NssmValueIfNeeded -NssmPath $nssm -Name $ServiceName -Key "AppRotation" -ExpectedValue $ExpectedAppRotation
 
 Write-Host "--- re-check via nssm get ---"
 foreach ($key in $keys) {

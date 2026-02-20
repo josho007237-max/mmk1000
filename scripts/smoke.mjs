@@ -65,6 +65,12 @@ async function main() {
     await reqJson("dashboard", "/dashboard?start=2020-01-01&end=2020-01-02");
     await reqJson("withdraw.queue", "/withdraw/queue");
 
+    const bankCode = (process.env.BANK_CODE || "").trim();
+    const bankAccount = (process.env.BANK_ACCOUNT || "").replace(/\s+/g, "");
+    if (!bankCode || !bankAccount) {
+      console.log("[skip] bank send (BANK_CODE/BANK_ACCOUNT not set)");
+    }
+
     const create = await reqJson("withdraw.create", "/withdraw/create", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -76,18 +82,34 @@ async function main() {
     });
     const id = create?.job?.id;
     if (!id) throw new Error("missing withdraw id");
+    const createdBankCode = create?.job?.dest?.bank_code;
+    if (createdBankCode !== "SCB") {
+      throw new Error(`bank_code_not_normalized:${createdBankCode || "missing"}`);
+    }
 
-    await reqJson("withdraw.approve", `/withdraw/${encodeURIComponent(id)}/approve`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: "{}",
-    });
-
-    await reqJson("withdraw.send", `/withdraw/${encodeURIComponent(id)}/send`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: "{}",
-    });
+    if (bankCode && bankAccount) {
+      const createReal = await reqJson("withdraw.create.real", "/withdraw/create", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          type: "bank",
+          amount: 1,
+          dest: { bank_code: bankCode, bank_ac: bankAccount },
+        }),
+      });
+      const idReal = createReal?.job?.id;
+      if (!idReal) throw new Error("missing withdraw id");
+      await reqJson("withdraw.approve.real", `/withdraw/${encodeURIComponent(idReal)}/approve`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+      });
+      await reqJson("withdraw.send.real", `/withdraw/${encodeURIComponent(idReal)}/send`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+      });
+    }
 
     if (QR_IMAGE && fs.existsSync(QR_IMAGE)) {
       const buf = fs.readFileSync(QR_IMAGE);

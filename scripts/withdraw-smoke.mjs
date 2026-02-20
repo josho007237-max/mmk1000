@@ -31,7 +31,7 @@ async function main() {
   const approved = await approveWithdrawal(job.id);
   logOk(`approved ${approved.id} status=${approved.status}`);
 
-  const sent = await markWithdrawalResult(job.id, "sent", { mock: true });
+  const sent = await markWithdrawalResult(job.id, "sent", { mock: true, ok: true, mode: "mock" });
   logOk(`sent ${sent.id} status=${sent.status}`);
 
   const items = await readQueueFile();

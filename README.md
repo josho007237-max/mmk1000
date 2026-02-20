@@ -1,5 +1,13 @@
 # MMK1000 Quick Runbook
 
+## Local Setup
+```powershell
+npm i
+Copy-Item .env.example .env
+# Edit .env locally with your own values. Never commit .env or .env.* files.
+npm run dev
+```
+
 ## Env (PowerShell)
 Set the API base and admin key for smoke tests:
 ```

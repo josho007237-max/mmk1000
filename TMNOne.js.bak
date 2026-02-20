@@ -6,19 +6,6 @@ import os from 'os';
 import zlib from 'zlib';
 import { URL } from 'url';
 
-function safeJson(x) {
-    try { return (typeof x === 'string') ? x : JSON.stringify(x); }
-    catch { return String(x); }
-}
-
-function redact(s) {
-    const t = String(s);
-    return t
-      .replace(/[A-Za-z0-9+/_-]{24,}/g, '[redacted]')
-      .replace(/\d{9,}/g, '[redacted]')
-      .slice(0,300);
-}
-
 class TMNOne {
 
     #tmnone_endpoint = 'https://api.tmn.one/api.php';
@@ -36,8 +23,6 @@ class TMNOne {
     #proxy_password = '';
     #shield_id = '';
     #debugging = false;
-    #sign256WarnAt = 0;
-    #mockShieldOnceUsed = false;
     faceauth_webhook_url;
     faceauth_wait_timeout = 180;
 
@@ -88,28 +73,13 @@ class TMNOne {
     #assertCoreCfg() {
         const kid = this.#normalizeKeyId(this.#tmnone_keyid);
         this.#assertKeyIdFormat(kid);
-        const missing = [];
-        if (!String(kid || '').trim()) missing.push('keyid');
-        if (!String(this.#wallet_login_token || '').trim()) missing.push('loginToken');
-        if (!String(this.#wallet_tmn_id || '').trim()) missing.push('tmnId');
-        if (!String(this.#wallet_device_id || '').trim()) missing.push('deviceId');
-        if (!String(this.#wallet_msisdn || '').trim()) missing.push('msisdn');
-        if (missing.length) {
-            const err = new Error('tmn_cfg_missing');
-            err.code = 'tmn_cfg_missing';
-            err.missing_fields = missing;
-            throw err;
+        if (!this.#wallet_login_token || !this.#wallet_tmn_id || !this.#wallet_device_id) {
+            throw new Error('TMN cfg missing: keyid/loginToken/tmnId/deviceId');
         }
     }
 
     async loginWithPin6(wallet_pin) {
         try {
-            this.#safeLog('[TMNOne] key_exchange cfg', {
-                keyid: { set: !!String(this.#tmnone_keyid || '').trim(), len: String(this.#tmnone_keyid || '').trim().length, mask: this.#maskSensitiveValue(this.#tmnone_keyid) },
-                tmnId: { set: !!String(this.#wallet_tmn_id || '').trim(), len: String(this.#wallet_tmn_id || '').trim().length, mask: this.#maskSensitiveValue(this.#wallet_tmn_id) },
-                deviceId: { set: !!String(this.#wallet_device_id || '').trim(), len: String(this.#wallet_device_id || '').trim().length, mask: this.#maskSensitiveValue(this.#wallet_device_id) },
-                msisdn: { set: !!String(this.#wallet_msisdn || '').trim(), len: String(this.#wallet_msisdn || '').trim().length, mask: this.#maskSensitiveValue(this.#wallet_msisdn) },
-            });
             this.#assertCoreCfg();
             await this.#getCachedAccessToken();
             if (this.#wallet_access_token) {
@@ -149,7 +119,7 @@ class TMNOne {
             }
 
             if (!wallet_response_body.code || !wallet_response_body.code.endsWith('-200')) {
-                throw new Error(this.#fmtWalletErr(wallet_response_body));
+                throw new Error(`${wallet_response_body.code} - ${wallet_response_body.message}`);
             }
             
             if (wallet_response_body.data?.access_token) {
@@ -175,13 +145,6 @@ class TMNOne {
                 await this.#uploadMetaData();
             }
         } catch (e) {
-            if (e?.response?.status === 400) {
-                const b = e?.response?.data || {};
-                this.#safeWarn('[TMNOne] key_exchange http400', {
-                    message: this.#mask(b?.message || ''),
-                    error: this.#mask(b?.error || '')
-                });
-            }
             this.#safeLog(`Error: ${e.message} on line ${e.stack.split('\n')[1]}`);
             return { error: e.message };
         }
@@ -230,18 +193,10 @@ class TMNOne {
 	*/
     async getBalance() {
         const uri = 'user-profile-composite/v1/users/balance/';
-        if (!this.#shield_id) {
-            this.#shield_id = await this.#getShieldID();
-        }
         const signature = await this.calculate_sign256(`/tmn-mobile-gateway/${uri}`);
         const headers = [
             'Content-Type: application/json',
-            `Authorization: ${this.#wallet_access_token}`,
-            `signature: ${signature}`,
-            `X-Device: ${this.#wallet_device_id}`,
-            'X-Geo-Location: city=; country=; country_code=',
-            'X-Geo-Position: lat=; lng=',
-            `X-Shield-Session-Id: ${this.#shield_id}`
+            `Authorization: ${this.#wallet_access_token}`
         ];
         return await this.#wallet_connect(uri, headers, '');
     }
@@ -405,7 +360,7 @@ class TMNOne {
             }
 
             if (!wallet_response_body.code || !wallet_response_body.code.endsWith('-200')) {
-                throw new Error(this.#fmtWalletErr(wallet_response_body));
+                throw new Error(`${wallet_response_body.code} - ${wallet_response_body.message}`);
             }
             return wallet_response_body;
         } catch (e) {
@@ -466,7 +421,7 @@ class TMNOne {
             let wallet_response_body = await this.#wallet_connect(uri, headers, post_body);
 
             if (!wallet_response_body.code || !wallet_response_body.code.endsWith('-200')) {
-                throw new Error(this.#fmtWalletErr(wallet_response_body));
+                throw new Error(`${wallet_response_body.code} - ${wallet_response_body.message}`);
             }
             
             draft_transaction_id = wallet_response_body.data.draft_transaction_id;
@@ -497,7 +452,7 @@ class TMNOne {
             }
 
             if (!wallet_response_body.code || !wallet_response_body.code.endsWith('-200')) {
-                throw new Error(this.#fmtWalletErr(wallet_response_body));
+                throw new Error(`${wallet_response_body.code} - ${wallet_response_body.message}`);
             }
 
             wallet_response_body.draft_transaction_id = draft_transaction_id;
@@ -559,7 +514,7 @@ class TMNOne {
             let wallet_response_body = await this.#wallet_connect(uri, headers, post_body);
 
             if (!wallet_response_body.code || !wallet_response_body.code.endsWith('-200')) {
-                throw new Error(this.#fmtWalletErr(wallet_response_body));
+                throw new Error(`${wallet_response_body.code} - ${wallet_response_body.message}`);
             }
             
             const draft_transaction_id = wallet_response_body.data.draft_transaction_id;
@@ -589,7 +544,7 @@ class TMNOne {
             }
 
             if (!wallet_response_body.code || !wallet_response_body.code.endsWith('-200')) {
-                throw new Error(this.#fmtWalletErr(wallet_response_body));
+                throw new Error(`${wallet_response_body.code} - ${wallet_response_body.message}`);
             }
             
             return wallet_response_body;
@@ -630,7 +585,7 @@ class TMNOne {
             let wallet_response_body = await this.#wallet_connect('fund-composite/v1/withdrawal/draft-transaction', headers, post_body);
 
             if (!wallet_response_body.code || !wallet_response_body.code.endsWith('-200')) {
-                throw new Error(this.#fmtWalletErr(wallet_response_body));
+                throw new Error(`${wallet_response_body.code} - ${wallet_response_body.message}`);
             }
             
             const draft_transaction_id = wallet_response_body.data.draft_transaction_id;
@@ -685,7 +640,7 @@ class TMNOne {
             }
 
             if (!wallet_response_body.code || !wallet_response_body.code.endsWith('-200')) {
-                throw new Error(this.#fmtWalletErr(wallet_response_body));
+                throw new Error(`${wallet_response_body.code} - ${wallet_response_body.message}`);
             }
 
             return wallet_response_body;
@@ -763,9 +718,6 @@ class TMNOne {
     }
 
     async #getShieldID() {
-        if (String(process.env.TMN_SHIELD_EXPIRED_MOCK || '') === '1') {
-            return 'mock-shield-id';
-        }
         const request_body = JSON.stringify({
             scope: 'extra',
             cmd: 'get_shield_id',
@@ -798,7 +750,7 @@ class TMNOne {
             let wallet_response_body = await this.#wallet_connect(uri, headers, '-');
 
             if (!wallet_response_body.code || !wallet_response_body.code.endsWith('-200')) {
-                throw new Error(this.#fmtWalletErr(wallet_response_body));
+                throw new Error(`${wallet_response_body.code} - ${wallet_response_body.message}`);
             }
 
             const session_id = wallet_response_body.data.session_id;
@@ -884,7 +836,7 @@ class TMNOne {
             let wallet_response_body = await this.#wallet_connect(uri, headers, '-');
 
             if (!wallet_response_body.code || !wallet_response_body.code.endsWith('-200')) {
-                throw new Error(this.#fmtWalletErr(wallet_response_body));
+                throw new Error(`${wallet_response_body.code} - ${wallet_response_body.message}`);
             }
 
             const session_id = wallet_response_body.data.session_id;
@@ -1026,14 +978,7 @@ class TMNOne {
     #redactSensitiveText(text) {
         let out = String(text);
         const kid = this.#normalizeKeyId(this.#tmnone_keyid);
-        const items = [
-            kid,
-            this.#wallet_login_token,
-            this.#wallet_tmn_id,
-            this.#wallet_device_id,
-            this.#wallet_msisdn,
-            process.env.TMN_PIN6
-        ];
+        const items = [kid, this.#wallet_login_token, this.#wallet_msisdn];
         for (const it of items) {
             if (!it) continue;
             const raw = String(it);
@@ -1080,64 +1025,6 @@ class TMNOne {
         return val;
     }
 
-    #fmtWalletErr(body) {
-        if (!body) return 'ERR - unknown_error';
-        if (body instanceof Error) {
-            const msg = String(body.message || 'unknown_error');
-            return `ERR - ${msg}`;
-        }
-        if (typeof body === 'string') {
-            const msg = body || 'unknown_error';
-            return `ERR - ${msg}`;
-        }
-        const msg =
-            body?.message ||
-            body?.error ||
-            body?.result?.error ||
-            body?.result?.message ||
-            body?.result?.data?.message ||
-            body?.data?.message ||
-            'unknown_error';
-        let code = body?.code;
-        if (code === undefined || code === null) {
-            code = 'ERR';
-        } else {
-            const s = String(code).trim().toLowerCase();
-            if (!s || s === 'undefined' || s === 'null') {
-                code = 'ERR';
-            }
-        }
-        return `${code} - ${msg}`;
-    }
-
-    #isShieldExpired(errOrBody) {
-        const msg = this.#fmtWalletErr(errOrBody);
-        let s = '';
-        try {
-            const payload = errOrBody?.payload ?? errOrBody?.data ?? errOrBody;
-            s = (typeof payload === 'string') ? payload : JSON.stringify(payload || {});
-        } catch {
-            s = '';
-        }
-        const hint = `${msg || ''} ${errOrBody?.message || ''} ${s}`;
-        return /shield[_\s-]*id\s*(?:is\s*)?expired|shield[_\s-]*id[^a-z0-9]*expired|shield[^a-z0-9]*expired|shield[_\s-]*session\s*(?:is\s*)?expired|shield[_\s-]*session[^a-z0-9]*expired/i.test(hint);
-    }
-
-    #patchShieldHeader(headers_array) {
-        let hasShieldHeader = false;
-        const headers2 = (headers_array || []).map(h => {
-            if (/^X-Shield-Session-Id\s*:/i.test(h)) {
-                hasShieldHeader = true;
-                return `X-Shield-Session-Id: ${this.#shield_id}`;
-            }
-            return h;
-        });
-        if (!hasShieldHeader) {
-            headers2.push(`X-Shield-Session-Id: ${this.#shield_id}`);
-        }
-        return headers2;
-    }
-
     #redactSensitiveAny(val) {
         if (val === null || val === undefined) return val;
         if (typeof val === 'string') return this.#redactSensitiveText(val);
@@ -1161,20 +1048,6 @@ class TMNOne {
         return val;
     }
 
-    safeJson(x) {
-        if (typeof x === 'string') return x;
-        try {
-            return JSON.stringify(x);
-        } catch (e) {
-            return String(x);
-        }
-    }
-
-    redact(s) {
-        const snip = String(s ?? '').slice(0, 300);
-        return snip.replace(/[A-Za-z0-9+/_-]{24,}/g, '[redacted]');
-    }
-
     #safeLog(...args) {
         console.log(...args.map((a) => this.#redactSensitiveAny(a)));
     }
@@ -1193,17 +1066,6 @@ class TMNOne {
         let response_body;
         let target_url = this.#tmnone_endpoint;
         let used_proxy_calc;
-        this.#print_debugging('tmnone_connect', `request_len=${String(request_body_json || '').length}`);
-        const shape = (v) => {
-            const s = String(v ?? '').trim();
-            return { set: s !== '', len: s.length };
-        };
-        this.#safeLog('[tmnone_connect] cfg_shape', {
-            keyid: shape(this.#tmnone_keyid),
-            tmnId: shape(this.#wallet_tmn_id),
-            deviceId: shape(this.#wallet_device_id),
-            msisdn: shape(this.#wallet_msisdn),
-        });
 
         const aes_key = crypto.createHash('sha512').update(this.#wallet_login_token).digest().slice(0, 32);
         const aes_iv = crypto.randomBytes(16);
@@ -1226,7 +1088,7 @@ class TMNOne {
                 'User-Agent': `okhttp/4.4.0/202601302100/${kid}`
             };
 
-            const maskLogValue = (val) => {
+            const redact = (val) => {
                 if (val === undefined || val === null) return '';
                 const str = String(val);
                 if (!str) return '';
@@ -1236,12 +1098,12 @@ class TMNOne {
             const safeProxyForLog = (proxyVal) => {
                 if (proxyVal === false) return false;
                 if (!proxyVal) return undefined;
-                if (typeof proxyVal === 'string') return maskLogValue(proxyVal);
+                if (typeof proxyVal === 'string') return redact(proxyVal);
                 const safe = { ...proxyVal };
                 if (safe.auth) {
                     safe.auth = {
-                        username: maskLogValue(safe.auth.username),
-                        password: maskLogValue(safe.auth.password)
+                        username: redact(safe.auth.username),
+                        password: redact(safe.auth.password)
                     };
                 }
                 return safe;
@@ -1269,30 +1131,24 @@ class TMNOne {
 
             this.#safeLog('tmnone_connect target_url:', target_url);
             this.#safeLog('tmnone_connect env_proxy:', {
-                HTTP_PROXY: maskLogValue(process.env.HTTP_PROXY),
-                HTTPS_PROXY: maskLogValue(process.env.HTTPS_PROXY),
-                ALL_PROXY: maskLogValue(process.env.ALL_PROXY),
-                NO_PROXY: maskLogValue(process.env.NO_PROXY),
-                PROXY_IP: maskLogValue(process.env.PROXY_IP)
+                HTTP_PROXY: redact(process.env.HTTP_PROXY),
+                HTTPS_PROXY: redact(process.env.HTTPS_PROXY),
+                ALL_PROXY: redact(process.env.ALL_PROXY),
+                NO_PROXY: redact(process.env.NO_PROXY),
+                PROXY_IP: redact(process.env.PROXY_IP)
             });
             this.#safeLog('tmnone_connect axios_proxy:', safeProxyForLog(axiosConfig.proxy));
 
-            const resp = await axios.post(target_url, postData, axiosConfig);
+            const response = await axios.post(target_url, postData, axiosConfig);
 
-            if (resp.headers['x-wallet-user-agent']) {
-                this.#wallet_user_agent = resp.headers['x-wallet-user-agent'];
+            if (response.headers['x-wallet-user-agent']) {
+                this.#wallet_user_agent = response.headers['x-wallet-user-agent'];
             }
-            if (resp.headers['x-wallet-app-version']) {
-                this.#wallet_version = resp.headers['x-wallet-app-version'];
+            if (response.headers['x-wallet-app-version']) {
+                this.#wallet_version = response.headers['x-wallet-app-version'];
             }
 
-            response_body = resp.data;
-            const js = this.#redactSensitiveText(redact(safeJson(resp.data))).slice(0, 180);
-            this.#safeLog('[tmnone_connect] response', {
-                status: resp.status,
-                keys: Object.keys(resp.data || {}),
-                resp_snip: js
-            });
+            response_body = response.data;
 
             if (response_body && response_body.encrypted) {
                 const decipher = crypto.createDecipheriv('aes-256-cbc', aes_key, aes_iv);
@@ -1301,13 +1157,6 @@ class TMNOne {
                     decipher.final()
                 ]);
                 response_body = JSON.parse(decrypted_raw.toString('utf8'));
-            }
-            const isSignReq = String(request_body_json || '').includes('"calculate_sign256"');
-            if (isSignReq && (!resp?.data?.encrypted || !response_body?.signature)) {
-                this.#safeWarn('[tmnone_connect] no_signature', {
-                    status: resp.status,
-                    resp_snip: js
-                });
             }
 
             const summary = {
@@ -1318,36 +1167,24 @@ class TMNOne {
             this.#print_debugging('tmnone_connect', `response_summary = ${JSON.stringify(summary)}`);
 
         } catch (e) {
-            const line = e?.stack ? e.stack.split('\n')[1] : '';
-            if (e?.response) {
-                const status = e.response.status;
-                let data_snip = '';
-                try {
-                    data_snip = String(e.response.data ?? '').slice(0, 300);
-                } catch {}
-                data_snip = this.#redactSensitiveText(data_snip);
-                this.#safeWarn('[tmnone_connect] HTTP error', { status, data_snip });
-                this.#safeLog(`Error: ${e.message} on line ${line}`);
-                return { error: e.message, status, data_snip };
-            }
-            this.#safeLog(`Error: ${e.message} on line ${line}`);
-            return { error: e.message };
+            const http_status = e?.response?.status;
+            let data = e?.response?.data;
+            try { if (typeof data === 'string') data = JSON.parse(data); } catch {}
+            // ห้าม log request_body_json เพราะมี token/device/pin
+            this.#safeLog(`tmnone_connect error: ${e.message}`);
+            const target_url = e?.config?.url || target_url;
+            const used_proxy = e?.config?.proxy ?? used_proxy_calc;
+            return { error: e.message, http_status, data, axios_code: e?.code, target_url, used_proxy };
         }
         return response_body;
     }
 
-    async #wallet_connect(uri, headers_array, request_body = '', custom_method = null) {
-        const SHIELD_EXPIRED_TEXT = 'shield_id is expired';
-        const hasShieldExpiredMessage = (b) => {
-            if (!b || typeof b !== 'object') return false;
-            return String(b?.message ?? '').toLowerCase().includes(SHIELD_EXPIRED_TEXT);
-        };
-        let did_retry_shield = false;
-        this.#print_debugging('wallet_connect', `headers_count = ${(headers_array || []).length}`);
-        this.#print_debugging('wallet_connect', `request_body_len = ${String(request_body || '').length}`);
+    async #wallet_connect(uri, headers_array, request_body = '', custom_method = null, retry_attempt = 0) {
+        this.#print_debugging('wallet_connect', `headers = ${JSON.stringify(headers_array)}`);
+        this.#print_debugging('wallet_connect', `request_body = ${request_body}`);
         let response_body;
 
-        let axios_headers = {};
+        const axios_headers = {};
         headers_array.forEach(header => {
             const parts = header.split(':');
             const key = parts.shift().trim();
@@ -1358,7 +1195,7 @@ class TMNOne {
         });
         axios_headers['User-Agent'] = this.#wallet_user_agent;
 
-        let config = {
+        const config = {
             url: `${this.#wallet_endpoint}${uri}`,
             method: custom_method || (request_body ? 'POST' : 'GET'),
             headers: axios_headers,
@@ -1390,64 +1227,26 @@ class TMNOne {
         }
 
         try {
-            const shieldMockOn = String(process.env.TMN_SHIELD_EXPIRED_MOCK || '') === '1';
-            if (shieldMockOn && !this.#mockShieldOnceUsed) {
-                this.#mockShieldOnceUsed = true;
-                response_body = { message: 'shield_id is expired' };
-            } else {
-                const response = await axios(config);
-                
-                try {
-                    response_body = JSON.parse(response.data);
-                } catch (json_e) {
-                    response_body = response.data;
-                }
+            const response = await axios(config);
+            
+            try {
+                response_body = JSON.parse(response.data);
+            } catch (json_e) {
+                response_body = response.data;
             }
 
-            const response_debug = {
-                type: typeof response_body,
-                code: this.#mask(response_body?.code),
-                message: this.#mask(response_body?.message),
-                error: this.#mask(response_body?.error),
-                data_message: this.#mask(response_body?.data?.message),
-                result_message: this.#mask(response_body?.result?.message)
-            };
-            this.#print_debugging('wallet_connect', `response_debug = ${JSON.stringify(response_debug)}`);
-            if (hasShieldExpiredMessage(response_body) && !did_retry_shield) {
-                const first_response_body = response_body;
-                did_retry_shield = true;
-                this.#safeLog('[TMNOne] shield expired -> refresh+retry');
+            // Retry once when shield_id expires (common TMN error)
+            const _shieldMsg = (typeof response_body === 'string')
+                ? response_body
+                : (response_body?.message || response_body?.error || '');
+            if (retry_attempt === 0 && _shieldMsg && String(_shieldMsg).toLowerCase().includes('shield_id is expired')) {
+                this.#print_debugging('wallet_connect', 'shield expired -> refresh shield_id + retry once');
                 this.#shield_id = await this.#getShieldID();
-                axios_headers['X-Shield-Session-Id'] = this.#shield_id;
-                config.headers['X-Shield-Session-Id'] = this.#shield_id;
-                headers_array = this.#patchShieldHeader(headers_array);
-                try {
-                    let retry_response_body;
-                    if (shieldMockOn) {
-                        retry_response_body = { code: 'MOCK-200', message: 'ok', data: {} };
-                    } else {
-                        const retry_response = await axios(config);
-                        try {
-                            retry_response_body = JSON.parse(retry_response.data);
-                        } catch (json_e) {
-                            retry_response_body = retry_response.data;
-                        }
-                    }
-                    response_body = hasShieldExpiredMessage(retry_response_body) ? first_response_body : retry_response_body;
-                } catch (retry_e) {
-                    if (retry_e.response) {
-                        let retry_response_body;
-                        try {
-                            retry_response_body = JSON.parse(retry_e.response.data);
-                        } catch (json_e) {
-                            retry_response_body = retry_e.response.data;
-                        }
-                        response_body = hasShieldExpiredMessage(retry_response_body) ? first_response_body : retry_response_body;
-                    } else {
-                        this.#safeLog(`Error: ${retry_e.message} on line ${retry_e.stack.split('\n')[1]}`);
-                        return { error: retry_e.message };
-                    }
-                }
+                const headers2 = (headers_array || []).map(h => /^X-Shield-Session-Id\s*:/i.test(h)
+                    ? `X-Shield-Session-Id: ${this.#shield_id}`
+                    : h
+                );
+                return await this.#wallet_connect(uri, headers2, request_body, custom_method, 1);
             }
 
             if (!response_body) {
@@ -1461,80 +1260,29 @@ class TMNOne {
 
         } catch (e) {
             if (e.response) {
-                const shieldMockOn = String(process.env.TMN_SHIELD_EXPIRED_MOCK || '') === '1';
                 try {
                     response_body = JSON.parse(e.response.data);
                 } catch (json_e) {
                     response_body = e.response.data;
                 }
-                if (shieldMockOn && !this.#mockShieldOnceUsed) {
-                    this.#mockShieldOnceUsed = true;
-                    response_body = {
-                        ...(typeof response_body === 'object' && response_body !== null ? response_body : {}),
-                        message: 'shield_id is expired'
-                    };
-                }
-                if (e.response.status === 400) {
-                    this.#safeWarn('[TMNOne] wallet_connect http400', {
-                        uri: this.#mask(uri),
-                        message: this.#mask(response_body?.message || ''),
-                        error: this.#mask(response_body?.error || '')
-                    });
-                }
                 
-                const response_debug = {
-                    type: typeof response_body,
-                    code: this.#mask(response_body?.code),
-                    message: this.#mask(response_body?.message),
-                    error: this.#mask(response_body?.error),
-                    data_message: this.#mask(response_body?.data?.message),
-                    result_message: this.#mask(response_body?.result?.message)
-                };
-                this.#print_debugging('wallet_connect', `response_debug = ${JSON.stringify(response_debug)}`);
-                if (hasShieldExpiredMessage(response_body) && !did_retry_shield) {
-                    const first_response_body = response_body;
-                    did_retry_shield = true;
-                this.#safeLog('[TMNOne] shield expired -> refresh+retry');
-                this.#shield_id = await this.#getShieldID();
-                axios_headers['X-Shield-Session-Id'] = this.#shield_id;
-                config.headers['X-Shield-Session-Id'] = this.#shield_id;
-                headers_array = this.#patchShieldHeader(headers_array);
-                try {
-                    if (shieldMockOn) {
-                        response_body = { code: 'MOCK-200', message: 'ok', data: {} };
-                    } else {
-                        const retry_response = await axios(config);
-                        try {
-                            response_body = JSON.parse(retry_response.data);
-                        } catch (json_e) {
-                            response_body = retry_response.data;
-                        }
-                    }
-                } catch (retry_e) {
-                    if (retry_e.response) {
-                        let retry_response_body;
-                        try {
-                            retry_response_body = JSON.parse(retry_e.response.data);
-                            } catch (json_e) {
-                                retry_response_body = retry_e.response.data;
-                            }
-                            response_body = retry_response_body;
-                        } else {
-                            this.#safeLog(`Error: ${retry_e.message} on line ${retry_e.stack.split('\n')[1]}`);
-                            return { error: retry_e.message };
-                        }
-                    }
-                    if (hasShieldExpiredMessage(response_body)) {
-                        response_body = first_response_body;
-                    }
+                // Retry once when shield_id expires (may come back as non-2xx)
+                const _shieldMsg = (typeof response_body === 'string')
+                    ? response_body
+                    : (response_body?.message || response_body?.error || '');
+                if (retry_attempt === 0 && _shieldMsg && String(_shieldMsg).toLowerCase().includes('shield_id is expired')) {
+                    this.#print_debugging('wallet_connect', 'shield expired (non-2xx) -> refresh shield_id + retry once');
+                    this.#shield_id = await this.#getShieldID();
+                    const headers2 = (headers_array || []).map(h => /^X-Shield-Session-Id\s*:/i.test(h)
+                        ? `X-Shield-Session-Id: ${this.#shield_id}`
+                        : h
+                    );
+                    return await this.#wallet_connect(uri, headers2, request_body, custom_method, 1);
                 }
 
                 if (response_body.code === 'MAS-401') {
                     const clear_cache_body = JSON.stringify({ scope: 'text_storage_obj', cmd: 'set', data: '' });
                     await this.#tmnone_connect(clear_cache_body);
-                } else if (did_retry_shield) {
-                    // Retry path returns normalized body (including first body when still expired)
-                    return response_body;
                 } else {
                     this.#safeLog(`Error: ${e.message} on line ${e.stack.split('\n')[1]}`);
                     return { error: e.message };
@@ -1553,9 +1301,6 @@ class TMNOne {
     }
 
     async calculate_sign256(data) {
-        if (String(process.env.TMN_SHIELD_EXPIRED_MOCK || '') === '1') {
-            return '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
-        }
         this.#assertCoreCfg();
         const request_body = JSON.stringify({
             cmd: 'calculate_sign256',
@@ -1565,31 +1310,18 @@ class TMNOne {
                 data: data
             }
         });
-        const obj = await this.#tmnone_connect(request_body);
-        const sig =
-            obj?.signature ||
-            obj?.result?.signature ||
-            obj?.data?.signature ||
-            obj?.result?.data?.signature ||
-            '';
-        const siglen = (typeof sig === 'string') ? sig.length : 0;
-        if (siglen !== 64) {
-            const now = Date.now();
-            if ((now - this.#sign256WarnAt) > 60000) {
-                this.#safeWarn(`[sign256] invalid siglen=${siglen}`);
-                this.#sign256WarnAt = now;
-            }
-            this._last_tmnone = {
-                at: Date.now(),
-                error: obj?.error || 'sign256 failed',
-                code: obj?.code,
-                message: obj?.message,
-                status: obj?.status,
-                data_snip: obj?.data_snip
-            };
-            return '';
+        const response = await this.#tmnone_connect(request_body);
+        if (response?.error) {
+            const err = new Error('sign256 failed');
+            err.http_status = response.http_status;
+            err.data = response.data;
+            err.code = response.axios_code || response.http_status || '-';
+            throw err;
         }
-        return sig;
+        if (!response?.signature) {
+            throw new Error('sign256 failed: empty_signature');
+        }
+        return response.signature;
     }
 }
 

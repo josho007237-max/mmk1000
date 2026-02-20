@@ -2,6 +2,8 @@ import "dotenv/config";
 import TMNOne from "../TMNOne.js";
 
 const isMock = (process.env.TMN_MODE || "").toLowerCase() === "mock";
+const is401 = (c) => typeof c === "string" && c.endsWith("-401");
+const is200 = (c) => typeof c === "string" && c.endsWith("-200");
 
 function assertCoreCfg(cfg) {
   const keyid = Number(cfg.keyid);
@@ -17,6 +19,7 @@ function envCfg() {
     loginToken: process.env.TMN_LOGIN_TOKEN || "",
     tmnId: process.env.TMN_TMN_ID || "",
     deviceId: process.env.TMN_DEVICE_ID || "",
+    pin6: process.env.TMN_PIN6 || "",
   };
 }
 
@@ -42,9 +45,14 @@ export async function tmnGetBalance() {
     );
   }
   assertCoreCfg(cfg);
-  await tmn.loginWithPin6(process.env.TMN_PIN6);
-  const balance = await tmn.getBalance();
-  return { ok: true, mode: "real", balance };
+  const pin6 = cfg.pin6 || process.env.TMN_PIN6;
+  await tmn.loginWithPin6(pin6);
+  let r1 = await tmn.getBalance();
+  if (is401(r1?.code)) {
+    await tmn.loginWithPin6(process.env.TMN_PIN6);
+    r1 = await tmn.getBalance();
+  }
+  return r1;
 }
 
 export async function tmnFetchTx(start, end, limit = 10, page = 1) {
@@ -78,7 +86,12 @@ export async function tmnFetchTx(start, end, limit = 10, page = 1) {
     );
   }
   assertCoreCfg(cfg);
-  await tmn.loginWithPin6(process.env.TMN_PIN6);
-  const res = await tmn.fetchTransactionHistory(start, end, limit, page);
-  return { ok: true, mode: "real", res };
+  const pin6 = cfg.pin6 || process.env.TMN_PIN6;
+  await tmn.loginWithPin6(pin6);
+  let r1 = await tmn.fetchTransactionHistory(start, end, limit, page);
+  if (is401(r1?.code)) {
+    await tmn.loginWithPin6(process.env.TMN_PIN6);
+    r1 = await tmn.fetchTransactionHistory(start, end, limit, page);
+  }
+  return r1;
 }

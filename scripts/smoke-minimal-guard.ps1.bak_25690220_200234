@@ -1,0 +1,190 @@
+param(
+  [string]$Base = "http://127.0.0.1:4101/api",
+  [string]$AdminKey = "mmk1000",
+  [ValidateSet("all", "case1", "case2", "case3")]
+  [string]$Case = "all"
+)
+
+$Base = $Base.Trim().TrimEnd('/')
+
+function Invoke-Api {
+  param(
+    [string]$Method,
+    [string]$Url,
+    [object]$Body = $null
+  )
+
+  $args = @("-sS", "-X", $Method, $Url, "-H", "Content-Type: application/json", "-H", "x-admin-key: $AdminKey")
+  if ($Body -ne $null) {
+    $json = $Body | ConvertTo-Json -Compress
+    $args += @("-d", $json)
+  }
+
+  $raw = & curl.exe @args -w "`n__HTTP__:%{http_code}"
+  $parts = $raw -split "__HTTP__:"
+  $contentRaw = ""
+  if ($parts.Length -gt 0 -and $null -ne $parts[0]) { $contentRaw = [string]$parts[0] }
+  $statusRaw = "0"
+  if ($parts.Length -gt 1 -and $null -ne $parts[1]) { $statusRaw = [string]$parts[1] }
+  $content = $contentRaw.Trim()
+  $status = [int]($statusRaw.Trim())
+  $obj = $null
+  if ($content) {
+    try { $obj = $content | ConvertFrom-Json } catch { $obj = $null }
+  }
+  return [pscustomobject]@{ status = $status; body = $obj; raw = $content }
+}
+
+function Assert-True {
+  param([bool]$Cond, [string]$Message)
+  if (-not $Cond) { throw $Message }
+}
+
+function Get-ReadableBody {
+  param([object]$Resp)
+  if ($null -eq $Resp) { return "" }
+  if ($Resp.raw) { return [string]$Resp.raw }
+  if ($Resp.body -ne $null) {
+    try { return ($Resp.body | ConvertTo-Json -Compress -Depth 10) } catch { return "" }
+  }
+  return ""
+}
+
+function Resolve-BasePort {
+  if ($PSBoundParameters.ContainsKey("Base") -and $Base) {
+    return $null
+  }
+  for ($port = 4100; $port -le 4120; $port++) {
+    $url = "http://localhost:$port/api/health"
+    $raw = (& curl.exe -sS --max-time 1 $url -w "`n__HTTP__:%{http_code}" 2>$null) -join "`n"
+    $parts = $raw -split "__HTTP__:"
+    if ($parts.Length -lt 2) { continue }
+    $statusRaw = [string]$parts[1]
+    $status = [int]($statusRaw.Trim())
+    if ($status -eq 200) {
+      return [pscustomobject]@{ port = $port; base = "http://localhost:$port/api" }
+    }
+  }
+  return $null
+}
+
+function Get-BasePort {
+  param([string]$TargetBase)
+  try {
+    $uri = [uri]$TargetBase
+    if ($uri.Port -gt 0) { return $uri.Port }
+  } catch {}
+  return 4100
+}
+
+function Is-ConnectError {
+  param([object]$Resp)
+  if ($null -eq $Resp) { return $true }
+  if ([int]$Resp.status -eq 0) { return $true }
+  $raw = Get-ReadableBody $Resp
+  return ($raw -match 'Failed to connect|Connection refused|Could not resolve host|timed out|connect to')
+}
+
+function Exit-ApiNotReachable {
+  param([string]$TargetBase)
+  $port = Get-BasePort $TargetBase
+  Write-Host "API not reachable at $TargetBase"
+  Write-Host "Try Base: http://localhost:$port/api"
+  Write-Host "Try Base: http://127.0.0.1:$port/api"
+  exit 1
+}
+
+function Test-Health {
+  param([string]$TargetBase)
+  $healthUrl = "$TargetBase/health"
+  $raw = (& curl.exe -sS --max-time 2 $healthUrl -w "`n__HTTP__:%{http_code}" 2>$null) -join "`n"
+  $parts = $raw -split "__HTTP__:"
+  if ($parts.Length -lt 2) { return $false }
+  $statusRaw = [string]$parts[1]
+  $status = [int]($statusRaw.Trim())
+  return ($status -eq 200)
+}
+
+function Ensure-ApiReachable {
+  $Base = $Base.Trim().TrimEnd('/')
+  $healthUrl = "$Base/health"
+  Write-Host "HealthURL=$healthUrl" -ForegroundColor DarkGray
+  try {
+    $null = Invoke-RestMethod -Method Get -Uri $healthUrl -TimeoutSec 15 -ErrorAction Stop
+  } catch {
+    Write-Host "MMK1000 API not reachable (timeout 15s): $healthUrl"
+    exit 1
+  }
+}
+
+function Run-Case1 {
+  Ensure-ApiReachable
+  Write-Host "[case1] create->approve->send with cfg missing should not become sent"
+  $create = Invoke-Api "POST" "$Base/withdraw/create" @{
+    type = "bank"
+    amount = 1
+    dest = @{ bank_code = "SCB"; bank_ac = "1234567890" }
+  }
+  if (Is-ConnectError $create) { Exit-ApiNotReachable $Base }
+  Assert-True ($create.status -eq 200) "case1_create_failed status=$($create.status) body=$(Get-ReadableBody $create)"
+  $id = $create.body.job.id
+
+  $approve = Invoke-Api "POST" "$Base/withdraw/$id/approve" @{}
+  Assert-True ($approve.status -eq 200) "case1_approve_failed status=$($approve.status) body=$($approve.raw)"
+
+  $send = Invoke-Api "POST" "$Base/withdraw/$id/send" @{}
+  Assert-True ($send.status -eq 400) "case1_send_expected_400 status=$($send.status) body=$($send.raw)"
+  Assert-True ($send.body.error -eq "tmn_cfg_missing") "case1_send_expected_tmn_cfg_missing body=$($send.raw)"
+
+  $queue = Invoke-Api "GET" "$Base/withdraw/queue"
+  Assert-True ($queue.status -eq 200) "case1_queue_failed status=$($queue.status) body=$($queue.raw)"
+  $job = @($queue.body.items | Where-Object { $_.id -eq $id })[0]
+  Assert-True ($null -ne $job) "case1_job_not_found_in_queue id=$id"
+  Assert-True ($job.status -ne "sent") "case1_job_must_not_be_sent id=$id status=$($job.status)"
+
+  Write-Host "[case1] PASS id=$id status=$($job.status)"
+}
+
+function Run-Case2 {
+  Write-Host "[case2] shield expired mock should retry once and return retry result"
+  $js = @'
+import TMNOne from "./TMNOne.js";
+process.env.TMN_SHIELD_EXPIRED_MOCK = "1";
+const tmn = new TMNOne();
+tmn.setDataWithAccessToken("x123", "token", "login", "device-id");
+const r = await tmn.getBalance();
+if (!r || r.code !== "MOCK-200") {
+  console.error("case2_expected_retry_result", JSON.stringify(r || null));
+  process.exit(1);
+}
+console.log("case2_ok", JSON.stringify({ code: r.code, message: r.message || "" }));
+'@
+  $out = $js | node --input-type=module -
+  if ($LASTEXITCODE -ne 0) {
+    throw "case2_failed output=$out"
+  }
+  Write-Host "[case2] PASS $out"
+}
+
+function Run-Case3 {
+  Ensure-ApiReachable
+  Write-Host "[case3] type=p2p should normalize to wallet"
+  $create = Invoke-Api "POST" "$Base/withdraw/create" @{
+    type = "p2p"
+    amount = 1
+    dest = @{ wallet_id = "0812345678" }
+  }
+  if (Is-ConnectError $create) { Exit-ApiNotReachable $Base }
+  Assert-True ($create.status -eq 200) "case3_create_failed status=$($create.status) body=$(Get-ReadableBody $create)"
+  Assert-True ($create.body.job.type -eq "wallet") "case3_expected_wallet type=$($create.body.job.type)"
+  Write-Host "[case3] PASS id=$($create.body.job.id) normalized_type=$($create.body.job.type)"
+}
+
+Ensure-ApiReachable
+
+Write-Host "== smoke-minimal-guard case=$Case =="
+if ($Case -in @("all", "case1")) { Run-Case1 }
+if ($Case -in @("all", "case2")) { Run-Case2 }
+if ($Case -in @("all", "case3")) { Run-Case3 }
+Write-Host "== smoke-minimal-guard done =="
+

@@ -7,6 +7,7 @@ const DEBUG_KEY     = "mmk1000_debug";
 const LAST_TAB_KEY  = "mmk1000_last_tab";
 const TMN_MODE_KEY  = "mmk1000_tmn_mode";
 const LANG_KEY      = "mmk1000_lang";
+const WITHDRAW_STATE_KEY = "mmk1000_withdraw_state";
 
 let DEBUG = (localStorage.getItem(DEBUG_KEY) === "1");
 let LAST_QUEUE_MAP = new Map(); // id -> item
@@ -88,6 +89,7 @@ const I18N = {
     ewallet_warn: "⚠️ proxy_value 15 หลัก (E-Wallet ID) — แนะนำระวังโหมด real",
     withdraw_hint_bank: "Tip: กด Enter ที่ bank_ac จะไปโฟกัส Amount",
     withdraw_hint_promptpay: "ถ้า proxy_value 15 หลัก (E-Wallet ID) แนะนำระวังโหมด real",
+    withdraw_hint_p2p: "P2P: ใส่เบอร์ทรู 10 หลัก (ห้ามตรงกับเบอร์ต้นทาง)",
     amount_invalid: "จำนวนเงินไม่ถูกต้อง",
     fill_bank_required: "กรอก bank_code / bank_ac ให้ครบ",
     fill_proxy_required: "กรอก proxy_value ให้ครบ",
@@ -187,6 +189,7 @@ const I18N = {
     ewallet_warn: "⚠️ proxy_value 15 digits (E-Wallet ID) — caution in real mode",
     withdraw_hint_bank: "Tip: press Enter in bank_ac to focus Amount",
     withdraw_hint_promptpay: "If proxy_value has 15 digits (E-Wallet ID), be careful in real mode",
+    withdraw_hint_p2p: "P2P: enter 10-digit TrueMoney phone (must differ from source)",
     amount_invalid: "Invalid amount",
     fill_bank_required: "Please fill bank_code / bank_ac",
     fill_proxy_required: "Please fill proxy_value",
@@ -384,7 +387,8 @@ function getAppJsVersion() {
 }
 
 function isDevHostName(hostname) {
-  return hostname === "localhost" || hostname === "127.0.0.1";
+  const h = (hostname || "").toLowerCase().trim();
+  return h === "localhost" || h === "127.0.0.1" || h === "::1";
 }
 
 function resolveDevHost() {
@@ -1359,8 +1363,21 @@ function preventWheelOnNumberInputs() {
   });
 }
 
+function loadWithdrawState() {
+  try {
+    const raw = localStorage.getItem(WITHDRAW_STATE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+
+function saveWithdrawState(state) {
+  try {
+    localStorage.setItem(WITHDRAW_STATE_KEY, JSON.stringify(state));
+  } catch {}
+}
+
 function renderWithdrawFields() {
-  const type = $("wType")?.value || "bank";
+  const type = $("wType")?.value || "wallet";
   const box  = $("wFields");
   const hint = $("destHint");
   if (!box) return;
@@ -1411,11 +1428,12 @@ function renderWithdrawFields() {
     box.innerHTML = `
       <div class="row" style="align-items:flex-end;">
         <div style="min-width:260px; flex:1;">
-          <div class="muted">wallet_id (P2P)</div>
-          <input id="wallet_id" placeholder="wallet id" />
+          <div class="muted">wallet_id / phone (10 digits)</div>
+          <input id="wallet_id" inputmode="numeric" placeholder="เช่น 0xxxxxxxxx" maxlength="10" />
         </div>
       </div>
     `;
+    if (hint) hint.textContent = t("withdraw_hint_p2p");
   }
 
   // Keyboard speed: Enter -> focus amount
@@ -1426,10 +1444,25 @@ function renderWithdrawFields() {
     }
   };
   ["bank_ac","proxy_value","wallet_id"].forEach(id => $(id)?.addEventListener("keydown", moveToAmount));
+
+  // Restore persisted destination inputs for this type
+  const saved = loadWithdrawState();
+  if (saved && saved.type === type) {
+    if (type === "bank") {
+      if (saved.dest?.bank_code && $("bank_code")) $("bank_code").value = saved.dest.bank_code;
+      if (saved.dest?.bank_ac && $("bank_ac")) $("bank_ac").value = saved.dest.bank_ac;
+    }
+    if (type === "promptpay" && saved.dest?.proxy_value && $("proxy_value")) {
+      $("proxy_value").value = saved.dest.proxy_value;
+    }
+    if (type === "wallet" && saved.dest?.wallet_id && $("wallet_id")) {
+      $("wallet_id").value = saved.dest.wallet_id;
+    }
+  }
 }
 
 function readWithdrawForm() {
-  const type = $("wType")?.value || "bank";
+  const type = $("wType")?.value || "wallet";
   const amount = Number(($("wAmount")?.value || "").toString());
 
   if (!Number.isFinite(amount) || amount <= 0) {
@@ -1446,16 +1479,25 @@ function readWithdrawForm() {
 
   if (type === "promptpay") {
     const proxy_value = ($("proxy_value")?.value || "").trim();
-    if (!proxy_value) throw new Error(t("fill_proxy_required"));
-    dest = { proxy_value };
+    const digits = proxy_value.replace(/\D/g, "");
+    const lenOk = digits.length === 10 || digits.length === 13 || digits.length === 15;
+    if (!lenOk) {
+      throw new Error(t("fill_proxy_required"));
+    }
+    dest = { proxy_value: digits };
+    if (digits.length === 15 && isRealMode()) {
+      throw new Error(t("ewallet_warn"));
+    }
   }
 
   if (type === "wallet") {
     const wallet_id = ($("wallet_id")?.value || "").trim();
-    if (!wallet_id) throw new Error(t("fill_wallet_required"));
-    dest = { wallet_id };
+    const digits = wallet_id.replace(/\D/g, "");
+    if (!/^\d{10}$/.test(digits)) throw new Error(t("fill_wallet_required"));
+    dest = { wallet_id: digits };
   }
 
+  saveWithdrawState({ type, amount, dest });
   return { type, amount, dest };
 }
 
@@ -1489,6 +1531,7 @@ function destToText(item) {
   const d = item?.dest || {};
   if (item.type === "bank") return `${d.bank_code || "-"}:${d.bank_ac || "-"}`;
   if (item.type === "promptpay") return `${d.proxy_value || "-"}`;
+  if (item.type === "p2p") return `${d.proxy_value || "-"}`;
   if (item.type === "wallet") return `${d.wallet_id || "-"}`;
   return "-";
 }
@@ -1788,6 +1831,12 @@ document.addEventListener("DOMContentLoaded", async () => {
   const lastTab = localStorage.getItem(LAST_TAB_KEY) || "dashboard";
   showTab(lastTab);
   initDates();
+  const savedW = loadWithdrawState();
+  if (savedW?.type && $("wType")) {
+    const opt = Array.from($("wType").options || []).some(o => o.value === savedW.type);
+    $("wType").value = opt ? savedW.type : $("wType").value;
+  }
+  if (savedW?.amount && $("wAmount")) $("wAmount").value = savedW.amount;
   renderWithdrawFields();
   preventWheelOnNumberInputs();
   buildDebugBox(isDevHost);
