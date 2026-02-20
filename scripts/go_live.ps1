@@ -2,14 +2,15 @@ param(
   [string]$WebServiceName = "mmk1000-web",
   [string]$TunnelServiceName = "mmk1000-tunnel",
   [string]$RepoDir = "C:\Users\ADMIN\MMK1000",
-  [string]$CloudflaredConfigPath = "$env:USERPROFILE\.cloudflared\config.yml",
-  [string]$PublicHealthUrl = "https://mmk1000.bn9.app/api/health"
+  [string]$LocalHealthUrl = "http://127.0.0.1:4101/api/health",
+  [string]$PublicHealthUrl = "https://mmk1000.bn9.app/api/health",
+  [string]$CloudflaredConfigPath = "$env:USERPROFILE\.cloudflared\config.yml"
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$script:HasFail = $false
+$failed = $false
 
 function Write-StepResult {
   param(
@@ -21,13 +22,12 @@ function Write-StepResult {
 
   if ($Pass) {
     Write-Host ("PASS [{0}] {1}" -f $Step, $Detail) -ForegroundColor Green
-    return
-  }
-
-  $script:HasFail = $true
-  Write-Host ("FAIL [{0}] {1}" -f $Step, $Detail) -ForegroundColor Red
-  if ($Fix) {
-    Write-Host ("  FIX: {0}" -f $Fix) -ForegroundColor Yellow
+  } else {
+    $script:failed = $true
+    Write-Host ("FAIL [{0}] {1}" -f $Step, $Detail) -ForegroundColor Red
+    if ($Fix) {
+      Write-Host ("  FIX: {0}" -f $Fix) -ForegroundColor Yellow
+    }
   }
 }
 
@@ -49,165 +49,76 @@ function Get-NssmPath {
   return $null
 }
 
-function Parse-EnvLines {
-  param([string]$Text)
-  $map = [ordered]@{}
-  if ([string]::IsNullOrWhiteSpace($Text)) { return $map }
-
-  $lines = $Text -split "`r?`n"
-  foreach ($line in $lines) {
-    if ([string]::IsNullOrWhiteSpace($line)) { continue }
-    if ($line -notmatch "=") { continue }
-    $parts = $line -split "=", 2
-    $k = $parts[0].Trim()
-    $v = $parts[1]
-    if (-not [string]::IsNullOrWhiteSpace($k)) {
-      $map[$k] = $v
-    }
-  }
-  return $map
-}
-
-function Merge-EnvExtra {
-  param(
-    [string]$Current,
-    [hashtable]$Override
-  )
-
-  $map = Parse-EnvLines -Text $Current
-  foreach ($k in $Override.Keys) {
-    $map[$k] = [string]$Override[$k]
-  }
-
-  $out = @()
-  foreach ($k in $map.Keys) {
-    $out += ("{0}={1}" -f $k, $map[$k])
-  }
-  return ($out -join "`n")
-}
-
-function Get-ConfiguredPortFromCloudflared {
-  param([string]$ConfigPath)
-  if (-not (Test-Path -LiteralPath $ConfigPath -PathType Leaf)) { return $null }
-
-  $cfg = Get-Content -LiteralPath $ConfigPath -Raw
-  $rxHost = [regex]"(?ms)hostname:\s*mmk1000\.bn9\.app\s*.*?service:\s*http://127\.0\.0\.1:(\d+)"
-  $m = $rxHost.Match($cfg)
-  if ($m.Success) { return [int]$m.Groups[1].Value }
-
-  $rxAny = [regex]"http://127\.0\.0\.1:(\d+)"
-  $m2 = $rxAny.Match($cfg)
-  if ($m2.Success) { return [int]$m2.Groups[1].Value }
-
-  return $null
-}
-
-function Get-NssmValueSafe {
+function Ensure-ServiceInstalled {
   param(
     [string]$Nssm,
-    [string]$Service,
-    [string]$Key
+    [string]$Name,
+    [string]$Application,
+    [string]$AppDirectory,
+    [string]$AppParameters
   )
 
-  try {
-    $raw = & $Nssm get $Service $Key 2>&1
-    if ($LASTEXITCODE -ne 0) { return "" }
-    $txt = ($raw | Out-String).Trim()
-    if ($txt -match "^Can't open service") { return "" }
-    return $txt
-  } catch {
-    return ""
+  $svc = Get-Service -Name $Name -ErrorAction SilentlyContinue
+  if (-not $svc) {
+    & $Nssm install $Name $Application $AppParameters | Out-Null
+    & $Nssm set $Name AppDirectory $AppDirectory | Out-Null
   }
-}
-
-function Ensure-TunnelService {
-  param(
-    [string]$Nssm,
-    [string]$Service,
-    [string]$ConfigPath,
-    [string]$AppDir
-  )
-
-  $args = "--config $ConfigPath tunnel run mmk1000"
-  $existing = Get-Service -Name $Service -ErrorAction SilentlyContinue
-  if (-not $existing) {
-    & $Nssm install $Service cloudflared $args | Out-Null
-  }
-
-  & $Nssm set $Service Application cloudflared | Out-Null
-  & $Nssm set $Service AppDirectory $AppDir | Out-Null
-  & $Nssm set $Service AppParameters $args | Out-Null
-  & $Nssm restart $Service | Out-Null
 }
 
 $nssm = Get-NssmPath
-Write-StepResult -Step "0.nssm" -Pass ([bool]$nssm) -Detail ("nssm={0}" -f $nssm) -Fix "Install nssm and add nssm.exe to PATH"
+Write-StepResult -Step "0.nssm" -Pass ([bool]$nssm) -Detail ("nssm path: {0}" -f $nssm) -Fix "Install NSSM and ensure nssm.exe is in PATH"
 if (-not $nssm) { exit 1 }
 
-$port = Get-ConfiguredPortFromCloudflared -ConfigPath $CloudflaredConfigPath
-if (-not $port) {
-  if (Test-Health -Url "http://127.0.0.1:4101/api/health") {
-    $port = 4101
-  } elseif (Test-Health -Url "http://127.0.0.1:4100/api/health") {
-    $port = 4100
-  } else {
-    $port = 4101
-  }
-}
-Write-StepResult -Step "1.detect-port" -Pass $true -Detail ("PORT={0}" -f $port) -Fix "Set ingress service in $CloudflaredConfigPath"
+$localHealthBefore = Test-Health -Url $LocalHealthUrl
+Write-StepResult -Step "1.local-health-before" -Pass $localHealthBefore -Detail $LocalHealthUrl -Fix "Start web service manually: nssm start $WebServiceName"
 
-$localUrl = "http://127.0.0.1:{0}/api/health" -f $port
-$okBefore = Test-Health -Url $localUrl
-Write-StepResult -Step "2.local-health-before" -Pass $okBefore -Detail $localUrl -Fix "nssm start $WebServiceName"
-
-$currentEnv = Get-NssmValueSafe -Nssm $nssm -Service $WebServiceName -Key "AppEnvironmentExtra"
-$targetEnv = Merge-EnvExtra -Current $currentEnv -Override @{
-  PORT = "$port"
-  DOTENV_CONFIG_PATH = "$RepoDir\.env"
-  DOTENV_CONFIG_OVERRIDE = "true"
-  DOTENV_CONFIG_QUIET = "true"
-}
-
+$envLine = "PORT=4101 DOTENV_CONFIG_PATH=$RepoDir\.env DOTENV_CONFIG_OVERRIDE=true DOTENV_CONFIG_QUIET=true"
 try {
-  & $nssm set $WebServiceName AppEnvironmentExtra $targetEnv | Out-Null
-  Write-StepResult -Step "3.merge-web-env" -Pass $true -Detail "Merged AppEnvironmentExtra (preserved existing keys)" -Fix "nssm get $WebServiceName AppEnvironmentExtra"
+  & $nssm set $WebServiceName AppEnvironmentExtra $envLine | Out-Null
+  Write-StepResult -Step "2.set-web-env" -Pass $true -Detail $envLine -Fix "nssm set $WebServiceName AppEnvironmentExtra \"$envLine\""
 } catch {
-  Write-StepResult -Step "3.merge-web-env" -Pass $false -Detail $_.Exception.Message -Fix "Run PowerShell as Administrator then: nssm set $WebServiceName AppEnvironmentExtra \"$targetEnv\""
+  Write-StepResult -Step "2.set-web-env" -Pass $false -Detail $_.Exception.Message -Fix "Run PowerShell as Administrator and retry"
 }
 
 try {
   & $nssm restart $WebServiceName | Out-Null
   Start-Sleep -Seconds 2
-  Write-StepResult -Step "4.restart-web" -Pass $true -Detail "restarted $WebServiceName" -Fix "nssm restart $WebServiceName"
+  Write-StepResult -Step "3.restart-web" -Pass $true -Detail "restarted $WebServiceName" -Fix "nssm restart $WebServiceName"
 } catch {
-  Write-StepResult -Step "4.restart-web" -Pass $false -Detail $_.Exception.Message -Fix "Check service: nssm edit $WebServiceName"
+  Write-StepResult -Step "3.restart-web" -Pass $false -Detail $_.Exception.Message -Fix "Check service config: nssm edit $WebServiceName"
 }
 
-$okAfter = Test-Health -Url $localUrl
-Write-StepResult -Step "5.local-health-after" -Pass $okAfter -Detail $localUrl -Fix "Check logs in $RepoDir\logs"
+$localHealthAfter = Test-Health -Url $LocalHealthUrl
+Write-StepResult -Step "4.local-health-after" -Pass $localHealthAfter -Detail $LocalHealthUrl -Fix "Check logs under $RepoDir\logs"
 
+$cfgOk = $false
 if (Test-Path -LiteralPath $CloudflaredConfigPath -PathType Leaf) {
   $cfg = Get-Content -LiteralPath $CloudflaredConfigPath -Raw
-  $expected = "hostname:\s*mmk1000\.bn9\.app[\s\S]*?service:\s*http://127\.0\.0\.1:{0}" -f $port
-  $ingressOk = [regex]::IsMatch($cfg, $expected)
-  Write-StepResult -Step "6.cloudflared-ingress" -Pass $ingressOk -Detail ("hostname mmk1000.bn9.app -> 127.0.0.1:{0}" -f $port) -Fix "Edit $CloudflaredConfigPath and set service: http://127.0.0.1:$port"
+  $cfgOk = $cfg -match "http://127\.0\.0\.1:4101"
+  Write-StepResult -Step "5.cloudflared-config" -Pass $cfgOk -Detail $CloudflaredConfigPath -Fix "Set ingress service to http://127.0.0.1:4101 in $CloudflaredConfigPath"
 } else {
-  Write-StepResult -Step "6.cloudflared-ingress" -Pass $false -Detail ("missing {0}" -f $CloudflaredConfigPath) -Fix "Create config file and define ingress for mmk1000.bn9.app"
+  Write-StepResult -Step "5.cloudflared-config" -Pass $false -Detail ("missing: {0}" -f $CloudflaredConfigPath) -Fix "Create cloudflared config at $CloudflaredConfigPath"
 }
 
+$cloudflaredExe = "cloudflared"
+$cloudflaredArgs = "--config $CloudflaredConfigPath tunnel run mmk1000"
 try {
-  Ensure-TunnelService -Nssm $nssm -Service $TunnelServiceName -ConfigPath $CloudflaredConfigPath -AppDir $RepoDir
-  Write-StepResult -Step "7.tunnel-service" -Pass $true -Detail "configured $TunnelServiceName" -Fix "nssm set $TunnelServiceName AppParameters \"--config $CloudflaredConfigPath tunnel run mmk1000\""
+  Ensure-ServiceInstalled -Nssm $nssm -Name $TunnelServiceName -Application $cloudflaredExe -AppDirectory $RepoDir -AppParameters $cloudflaredArgs
+  & $nssm set $TunnelServiceName Application $cloudflaredExe | Out-Null
+  & $nssm set $TunnelServiceName AppDirectory $RepoDir | Out-Null
+  & $nssm set $TunnelServiceName AppParameters $cloudflaredArgs | Out-Null
+  & $nssm restart $TunnelServiceName | Out-Null
+  Write-StepResult -Step "6.tunnel-service" -Pass $true -Detail "$TunnelServiceName => $cloudflaredArgs" -Fix "nssm set $TunnelServiceName AppParameters \"$cloudflaredArgs\""
 } catch {
-  Write-StepResult -Step "7.tunnel-service" -Pass $false -Detail $_.Exception.Message -Fix "Install cloudflared and run script as Administrator"
+  Write-StepResult -Step "6.tunnel-service" -Pass $false -Detail $_.Exception.Message -Fix "Ensure cloudflared is installed and run PowerShell as Administrator"
 }
 
-$publicOk = Test-Health -Url $PublicHealthUrl
-Write-StepResult -Step "8.public-health" -Pass $publicOk -Detail $PublicHealthUrl -Fix "cloudflared tunnel info mmk1000"
+$publicHealth = Test-Health -Url $PublicHealthUrl
+Write-StepResult -Step "7.public-health" -Pass $publicHealth -Detail $PublicHealthUrl -Fix "Check tunnel status: cloudflared tunnel info mmk1000"
 
-if ($script:HasFail) {
-  Write-Host "Go-Live MMK1000: FAIL" -ForegroundColor Red
+if ($failed) {
+  Write-Host "Go-Live MMK1000 result: FAIL" -ForegroundColor Red
   exit 1
 }
 
-Write-Host "Go-Live MMK1000: PASS" -ForegroundColor Green
+Write-Host "Go-Live MMK1000 result: PASS" -ForegroundColor Green
