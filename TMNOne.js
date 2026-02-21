@@ -1337,11 +1337,7 @@ class TMNOne {
     }
 
     async #wallet_connect(uri, headers_array, request_body = '', custom_method = null) {
-        const hasShieldExpiredMessage = (b) => {
-            if (!b || typeof b !== 'object') return false;
-            const msg = String(b?.message ?? '');
-            return /shield/i.test(msg) && /expired/i.test(msg);
-        };
+        const hasShieldOrSessionExpired = (b) => this.#isShieldExpired(b);
         let did_retry_shield = false;
         this.#print_debugging('wallet_connect', `headers_count = ${(headers_array || []).length}`);
         this.#print_debugging('wallet_connect', `request_body_len = ${String(request_body || '').length}`);
@@ -1413,10 +1409,10 @@ class TMNOne {
                 result_message: this.#mask(response_body?.result?.message)
             };
             this.#print_debugging('wallet_connect', `response_debug = ${JSON.stringify(response_debug)}`);
-            if (hasShieldExpiredMessage(response_body) && !did_retry_shield) {
+            if (hasShieldOrSessionExpired(response_body) && !did_retry_shield) {
                 const first_response_body = response_body;
                 did_retry_shield = true;
-                this.#safeLog('[TMNOne] shield expired -> refresh+retry');
+                this.#safeLog('[TMNOne] shield/session expired -> refresh+retry_once');
                 this.#shield_id = await this.#getShieldID();
                 axios_headers['X-Shield-Session-Id'] = this.#shield_id;
                 config.headers['X-Shield-Session-Id'] = this.#shield_id;
@@ -1433,7 +1429,7 @@ class TMNOne {
                             retry_response_body = retry_response.data;
                         }
                     }
-                    response_body = hasShieldExpiredMessage(retry_response_body) ? first_response_body : retry_response_body;
+                    response_body = hasShieldOrSessionExpired(retry_response_body) ? first_response_body : retry_response_body;
                 } catch (retry_e) {
                     if (retry_e.response) {
                         let retry_response_body;
@@ -1442,7 +1438,7 @@ class TMNOne {
                         } catch (json_e) {
                             retry_response_body = retry_e.response.data;
                         }
-                        response_body = hasShieldExpiredMessage(retry_response_body) ? first_response_body : retry_response_body;
+                        response_body = hasShieldOrSessionExpired(retry_response_body) ? first_response_body : retry_response_body;
                     } else {
                         this.#safeLog(`Error: ${retry_e.message} on line ${retry_e.stack.split('\n')[1]}`);
                         return { error: retry_e.message };
@@ -1491,10 +1487,10 @@ class TMNOne {
                     result_message: this.#mask(response_body?.result?.message)
                 };
                 this.#print_debugging('wallet_connect', `response_debug = ${JSON.stringify(response_debug)}`);
-                if (hasShieldExpiredMessage(response_body) && !did_retry_shield) {
+                if (hasShieldOrSessionExpired(response_body) && !did_retry_shield) {
                     const first_response_body = response_body;
                     did_retry_shield = true;
-                this.#safeLog('[TMNOne] shield expired -> refresh+retry');
+                this.#safeLog('[TMNOne] shield/session expired -> refresh+retry_once');
                 this.#shield_id = await this.#getShieldID();
                 axios_headers['X-Shield-Session-Id'] = this.#shield_id;
                 config.headers['X-Shield-Session-Id'] = this.#shield_id;
@@ -1524,7 +1520,7 @@ class TMNOne {
                             return { error: retry_e.message };
                         }
                     }
-                    if (hasShieldExpiredMessage(response_body)) {
+                    if (hasShieldOrSessionExpired(response_body)) {
                         response_body = first_response_body;
                     }
                 }

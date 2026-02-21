@@ -10,7 +10,6 @@ logs/
 
 # local data ที่มีข้อมูลจริง (เลือกกันไว้ก่อน)
 data/withdraw-queue.json
-data/*.json
 
 # OS/Editor
 .DS_Store
@@ -42,3 +41,5 @@ data/withdraw-queue*.bak*
 scripts/*.bak*
 *.pem
 *credential*.json
+.env*
+!data/withdraw-queue.example.json
