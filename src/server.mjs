@@ -53,7 +53,7 @@ const app = express();
 const BUILD_TIME = new Date().toISOString();
 app.use(express.json({ limit: "1mb" }));
 app.use((req, res, next) => {
-  const requestId = String(req.get("x-request-id") || req.get("x-rid") || crypto.randomUUID());
+  const requestId = crypto.randomUUID();
   req.requestId = requestId;
   res.setHeader("x-request-id", requestId);
   const started = Date.now();
