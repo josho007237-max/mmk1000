@@ -66,13 +66,15 @@ export async function getWithdrawal(id) {
   return db.items.find(x => x.id === id) || null;
 }
 
+function normalizeWithdrawType(type) {
+  return type === "p2p" ? "wallet" : type;
+}
+
 function validateCreate(body) {
   const amount = Number(body.amount);
   if (!Number.isFinite(amount) || amount <= 0) throw new Error("bad_amount");
 
-  let type = body.type;
-  // Normalize alias: p2p -> wallet (same TMN API path)
-  if (type === "p2p") type = "wallet";
+  let type = normalizeWithdrawType(body.type);
   if (!["bank","promptpay","wallet"].includes(type)) throw new Error("bad_type");
 
   const dest = body.dest || {};
@@ -99,7 +101,8 @@ function validateCreate(body) {
 }
 
 export async function createWithdrawal(body) {
-  const clean = validateCreate(body);
+  const normalizedBody = { ...body, type: normalizeWithdrawType(body?.type) };
+  const clean = validateCreate(normalizedBody);
   const db = await readAll();
 
   const job = {

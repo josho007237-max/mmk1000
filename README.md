@@ -85,3 +85,19 @@ Do not switch between `localhost` and `127.0.0.1` for the UI. They are different
 3. Click Clear site data, then refresh.
 4. This clears browser data for this origin only (does not affect code).
 # mmk1000
+
+## Cloudflared 502 Fix (PowerShell)
+ตรวจและแก้ origin port ที่ cloudflared ส่งต่อ พร้อมเช็คสุขภาพปลายทาง:
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\fix-cloudflared-port.ps1 `
+  -Hostname mmk1000.bn9.app `
+  -ExpectedOriginUrl http://127.0.0.1:4100
+```
+
+จัดการ service (NSSM/Cloudflared) และดู error log:
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\manage-cloudflared-service.ps1 -Action status
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\manage-cloudflared-service.ps1 -Action restart
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\manage-cloudflared-service.ps1 -Action logs
+```
+

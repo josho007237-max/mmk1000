@@ -1,4 +1,5 @@
 import fs from "fs";
+import crypto from "crypto";
 import dotenv from "dotenv";
 import express from "express";
 import multer from "multer";
@@ -51,6 +52,18 @@ if (!IS_PROD) {
 const app = express();
 const BUILD_TIME = new Date().toISOString();
 app.use(express.json({ limit: "1mb" }));
+app.use((req, res, next) => {
+  const requestId = String(req.get("x-request-id") || req.get("x-rid") || crypto.randomUUID());
+  req.requestId = requestId;
+  res.setHeader("x-request-id", requestId);
+  const started = Date.now();
+  console.log(`[req] id=${requestId} ${req.method} ${req.originalUrl}`);
+  res.on("finish", () => {
+    const ms = Date.now() - started;
+    console.log(`[res] id=${requestId} status=${res.statusCode} ms=${ms} ${req.method} ${req.originalUrl}`);
+  });
+  next();
+});
 
 const PORT = Number(process.env.PORT || 4100);
 const port = PORT;
@@ -71,9 +84,17 @@ process.on("uncaughtException", (err) => {
 process.on("unhandledRejection", (reason) => {
   if (startupPhase) logStartupCrash(reason, "unhandled_rejection");
 });
-const ADMIN_KEY = process.env.ADMIN_KEY || "mmk1000";
+const ADMIN_KEY = String(process.env.ADMIN_KEY || "").trim();
+if (!ADMIN_KEY) {
+  console.error("[MMK1000] ADMIN_KEY is required");
+  process.exit(1);
+}
 const raw = process.env.ADMIN_KEYS || ADMIN_KEY;
 const allowed = raw.split(",").map(s => s.trim()).filter(Boolean);
+if (!allowed.length || allowed.some((k) => k.length < 32)) {
+  console.error("[MMK1000] ADMIN_KEY/ADMIN_KEYS must be >= 32 chars");
+  process.exit(1);
+}
 const viewRaw = process.env.ADMIN_KEYS_VIEW || raw;
 const fullRaw = process.env.ADMIN_KEYS_FULL || raw;
 const viewKeys = viewRaw.split(",").map((s) => s.trim()).filter(Boolean);
@@ -551,15 +572,16 @@ adminApi.post("/withdraw/:id/send", requireFullAdmin, async (req, res) => {
     }
     const typeRaw = String(job?.type || "");
     const type = typeRaw === "p2p" ? "wallet" : typeRaw;
-    if (typeRaw === "p2p") {
-      job = { ...job, type: "wallet" };
-    }
     const sourceMsisdn = String(process.env.TMN_MSISDN ?? "").replace(/\D/g, "");
-    const p2pProxy = String(job?.dest?.proxy_value ?? "").replace(/\D/g, "");
+    const walletDigits = String(job?.dest?.wallet_id ?? job?.dest?.proxy_value ?? "").replace(/\D/g, "");
+    if (typeRaw === "p2p") {
+      job = { ...job, type: "wallet", dest: { ...(job?.dest || {}), wallet_id: walletDigits } };
+    }
     const sameAsSource =
-      p2pProxy !== "" &&
+      type === "wallet" &&
+      walletDigits !== "" &&
       sourceMsisdn !== "" &&
-      p2pProxy === sourceMsisdn;
+      walletDigits === sourceMsisdn;
     const destRaw2 = job?.dest?.proxy_value ?? job?.dest?.wallet_id ?? job?.dest?.bank_ac ?? "";
     const destDigits = String(destRaw2 ?? "").replace(/\D/g, "");
     const destLen = destDigits.length || String(destRaw2 ?? "").length;
@@ -569,20 +591,20 @@ adminApi.post("/withdraw/:id/send", requireFullAdmin, async (req, res) => {
       dest_len: destLen,
       same_as_source: sameAsSource,
     });
-    const rid = String(req.get("x-request-id") || req.get("x-rid") || "");
+    const rid = String(req.requestId || req.get("x-request-id") || req.get("x-rid") || "");
     console.log(`withdraw_send id=${job.id} type=${type} trace=${rid}`);
 
-    if (typeRaw === "p2p" && !/^\d{10}$/.test(p2pProxy)) {
+    if (type === "wallet" && !/^\d{10}$/.test(walletDigits)) {
       try {
         await markWithdrawalResult(job.id, "failed", {
-          error: "p2p_dest_invalid",
+          error: "wallet_dest_invalid",
           hint: "เบอร์ปลายทางต้องเป็น 10 หลัก",
           at: Date.now(),
         });
       } catch {}
-      console.log(`withdraw_send_fail id=${job.id} error=p2p_dest_invalid`);
-      logWithdrawSend("failed", false, "p2p_dest_invalid");
-      return sendErr(res, 400, "p2p_dest_invalid");
+      console.log(`withdraw_send_fail id=${job.id} error=wallet_dest_invalid`);
+      logWithdrawSend("failed", false, "wallet_dest_invalid");
+      return sendErr(res, 400, "wallet_dest_invalid");
     }
     if (sameAsSource) {
       try {
