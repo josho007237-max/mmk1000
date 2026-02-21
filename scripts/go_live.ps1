@@ -1,66 +1,66 @@
 <<<<<<< HEAD
 # scripts/go_live.ps1
 param(
-    [int]$Port,
-    [string]$DotenvPath,
-    [string]$AdminKey,
-    [string]$Hostname = "mmk1000.bn9.app",
-    [string]$PublicHealthUrl = "https://mmk1000.bn9.app/api/health",
-    [string]$TunnelName = "mmk1000",
-    [string]$WebService = "mmk1000-web",
-    [string]$TunnelService = "mmk1000-tunnel"
+  [int]$Port,
+  [string]$DotenvPath,
+  [string]$AdminKey,
+  [string]$Hostname = "mmk1000.bn9.app",
+  [string]$PublicHealthUrl = "https://mmk1000.bn9.app/api/health",
+  [string]$TunnelName = "mmk1000",
+  [string]$WebService = "mmk1000-web",
+  [string]$TunnelService = "mmk1000-tunnel"
 )
 
 $ErrorActionPreference = "Stop"
 
 function Is-Admin {
-    $id = [Security.Principal.WindowsIdentity]::GetCurrent()
-    $p = New-Object Security.Principal.WindowsPrincipal($id)
-    return $p.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+  $id = [Security.Principal.WindowsIdentity]::GetCurrent()
+  $p = New-Object Security.Principal.WindowsPrincipal($id)
+  return $p.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
 function Step($name, $ok, $msg, $fix) {
-    if ($ok) {
-        Write-Host ("[PASS] {0} - {1}" -f $name, $msg) -ForegroundColor Green
-        return $true
+  if ($ok) {
+    Write-Host ("[PASS] {0} - {1}" -f $name, $msg) -ForegroundColor Green
+    return $true
+  }
+  else {
+    Write-Host ("[FAIL] {0} - {1}" -f $name, $msg) -ForegroundColor Red
+    if ($fix) {
+      Write-Host ("  FIX: {0}" -f $fix) -ForegroundColor Yellow
     }
-    else {
-        Write-Host ("[FAIL] {0} - {1}" -f $name, $msg) -ForegroundColor Red
-        if ($fix) {
-            Write-Host ("  FIX: {0}" -f $fix) -ForegroundColor Yellow
-        }
-        return $false
-    }
+    return $false
+  }
 }
 
 function Try-GetLocalHealth($url) {
-    try {
-        $r = Invoke-RestMethod -Method Get -Uri $url -TimeoutSec 5
-        return @{ ok = $true; data = $r }
-    }
-    catch {
-        return @{ ok = $false; err = $_ }
-    }
+  try {
+    $r = Invoke-RestMethod -Method Get -Uri $url -TimeoutSec 5
+    return @{ ok = $true; data = $r }
+  }
+  catch {
+    return @{ ok = $false; err = $_ }
+  }
 }
 
 function Get-NssmEnv($svc) {
-    $raw = ""
-    try { $raw = (& nssm get $svc AppEnvironmentExtra) 2>$null } catch { $raw = "" }
-    $map = @{}
-    ($raw -split "(`r`n|`n|`r)") | Where-Object { $_ -match "=" } | ForEach-Object {
-        $k, $v = $_.Split("=", 2)
-        if ($k) { $map[$k.Trim()] = $v }
-    }
-    return $map
+  $raw = ""
+  try { $raw = (& nssm get $svc AppEnvironmentExtra) 2>$null } catch { $raw = "" }
+  $map = @{}
+  ($raw -split "(`r`n|`n|`r)") | Where-Object { $_ -match "=" } | ForEach-Object {
+    $k, $v = $_.Split("=", 2)
+    if ($k) { $map[$k.Trim()] = $v }
+  }
+  return $map
 }
 
 function Set-NssmEnvMerged($svc, $updates) {
-    $map = Get-NssmEnv $svc
-    foreach ($k in $updates.Keys) {
-        $map[$k] = $updates[$k]
-    }
-    $text = ($map.GetEnumerator() | Sort-Object Name | ForEach-Object { "$($_.Name)=$($_.Value)" }) -join "`n"
-    & nssm set $svc AppEnvironmentExtra $text | Out-Null
+  $map = Get-NssmEnv $svc
+  foreach ($k in $updates.Keys) {
+    $map[$k] = $updates[$k]
+  }
+  $text = ($map.GetEnumerator() | Sort-Object Name | ForEach-Object { "$($_.Name)=$($_.Value)" }) -join "`n"
+  & nssm set $svc AppEnvironmentExtra $text | Out-Null
 }
 
 # repo root = parent of scripts/
@@ -71,8 +71,8 @@ $allOk = $true
 
 # 0) Admin
 if (-not (Is-Admin)) {
-    Step "Admin" $false "Not running as Administrator" "Right-click PowerShell -> Run as Administrator, then rerun: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\go_live.ps1" | Out-Null
-    exit 1
+  Step "Admin" $false "Not running as Administrator" "Right-click PowerShell -> Run as Administrator, then rerun: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\go_live.ps1" | Out-Null
+  exit 1
 }
 Step "Admin" $true "Elevated OK" $null | Out-Null
 
@@ -85,21 +85,21 @@ $allOk = (Step "Tool:cloudflared" $hasCf "cloudflared found=$hasCf" "Install clo
 # 2) detect port from config.yml if not provided
 $cfg = "$env:USERPROFILE\.cloudflared\config.yml"
 if (-not $PSBoundParameters.ContainsKey("Port")) {
-    $det = $null
-    if (Test-Path $cfg) {
-        $txt = Get-Content $cfg -Raw
-        $pat = "(?ms)-\s*hostname:\s*{0}\s*\r?\n\s*service:\s*http://127\.0\.0\.1:(\d+)" -f [regex]::Escape($Hostname)
-        $m = [regex]::Match($txt, $pat)
-        if ($m.Success) { $det = [int]$m.Groups[1].Value }
+  $det = $null
+  if (Test-Path $cfg) {
+    $txt = Get-Content $cfg -Raw
+    $pat = "(?ms)-\s*hostname:\s*{0}\s*\r?\n\s*service:\s*http://127\.0\.0\.1:(\d+)" -f [regex]::Escape($Hostname)
+    $m = [regex]::Match($txt, $pat)
+    if ($m.Success) { $det = [int]$m.Groups[1].Value }
+  }
+  if (-not $det) {
+    foreach ($p in 4101, 4100) {
+      $u = "http://127.0.0.1:$p/api/health"
+      if ((Try-GetLocalHealth $u).ok) { $det = $p; break }
     }
-    if (-not $det) {
-        foreach ($p in 4101, 4100) {
-            $u = "http://127.0.0.1:$p/api/health"
-            if ((Try-GetLocalHealth $u).ok) { $det = $p; break }
-        }
-    }
-    if (-not $det) { $det = 4101 }
-    $Port = $det
+  }
+  if (-not $det) { $det = 4101 }
+  $Port = $det
 }
 
 $localUrl = "http://127.0.0.1:$Port/api/health"
@@ -110,76 +110,76 @@ $allOk = (Step "LocalHealth:pre" $pre.ok "GET $localUrl" "Start web service: nss
 
 # 4) set web service env + restart
 if (-not $DotenvPath) {
-    $candidate = Join-Path $repoRoot ".env.tmn.real"
-    if (Test-Path $candidate) { $DotenvPath = $candidate }
+  $candidate = Join-Path $repoRoot ".env.tmn.real"
+  if (Test-Path $candidate) { $DotenvPath = $candidate }
 }
 
 $updates = @{
-    "PORT"                   = "" + $Port
-    "DOTENV_CONFIG_QUIET"    = "true"
-    "DOTENV_CONFIG_OVERRIDE" = "true"
+  "PORT"                   = "" + $Port
+  "DOTENV_CONFIG_QUIET"    = "true"
+  "DOTENV_CONFIG_OVERRIDE" = "true"
 }
 if ($DotenvPath) { $updates["DOTENV_CONFIG_PATH"] = $DotenvPath }
 if ($AdminKey) { $updates["ADMIN_KEY"] = $AdminKey }
 
 try {
-    Set-NssmEnvMerged $WebService $updates
-    & nssm set $WebService Start SERVICE_AUTO_START | Out-Null
-    & nssm restart $WebService | Out-Null
-    Start-Sleep -Milliseconds 600
-    $post = Try-GetLocalHealth $localUrl
-    $allOk = (Step "WebService" $post.ok "Restarted $WebService; health OK on :$Port" "Check logs: Get-Content .\logs\web.err.log -Tail 200") -and $allOk
+  Set-NssmEnvMerged $WebService $updates
+  & nssm set $WebService Start SERVICE_AUTO_START | Out-Null
+  & nssm restart $WebService | Out-Null
+  Start-Sleep -Milliseconds 600
+  $post = Try-GetLocalHealth $localUrl
+  $allOk = (Step "WebService" $post.ok "Restarted $WebService; health OK on :$Port" "Check logs: Get-Content .\logs\web.err.log -Tail 200") -and $allOk
 }
 catch {
-    $allOk = (Step "WebService" $false "Failed to set/restart $WebService" "Run as Admin + verify service exists: nssm status $WebService") -and $allOk
+  $allOk = (Step "WebService" $false "Failed to set/restart $WebService" "Run as Admin + verify service exists: nssm status $WebService") -and $allOk
 }
 
 # 5) validate cloudflared ingress
 if (Test-Path $cfg) {
-    $txt = Get-Content $cfg -Raw
-    $pat2 = "(?ms)-\s*hostname:\s*{0}\s*\r?\n\s*service:\s*(?<svc>[^\r\n]+)" -f [regex]::Escape($Hostname)
-    $m2 = [regex]::Match($txt, $pat2)
-    $okIngress = $m2.Success -and ($m2.Groups["svc"].Value -match "http://127\.0\.0\.1:$Port\b")
-    $fixIngress = "Edit $cfg and set for hostname $Hostname: service: http://127.0.0.1:$Port"
-    $allOk = (Step "TunnelConfig" $okIngress "ingress points to 127.0.0.1:$Port" $fixIngress) -and $allOk
+  $txt = Get-Content $cfg -Raw
+  $pat2 = "(?ms)-\s*hostname:\s*{0}\s*\r?\n\s*service:\s*(?<svc>[^\r\n]+)" -f [regex]::Escape($Hostname)
+  $m2 = [regex]::Match($txt, $pat2)
+  $okIngress = $m2.Success -and ($m2.Groups["svc"].Value -match "http://127\.0\.0\.1:$Port\b")
+  $fixIngress = "Edit $cfg and set for hostname $Hostname: service: http://127.0.0.1:$Port"
+  $allOk = (Step "TunnelConfig" $okIngress "ingress points to 127.0.0.1:$Port" $fixIngress) -and $allOk
 }
 else {
-    $allOk = (Step "TunnelConfig" $false "Missing $cfg" "Create config.yml under $env:USERPROFILE\.cloudflared\") -and $allOk
+  $allOk = (Step "TunnelConfig" $false "Missing $cfg" "Create config.yml under $env:USERPROFILE\.cloudflared\") -and $allOk
 }
 
 # 6) ensure tunnel service
 try {
-    $cf = (Get-Command cloudflared.exe).Source
-    $svc = Get-Service -Name $TunnelService -ErrorAction SilentlyContinue
-    if (-not $svc) {
-        & nssm install $TunnelService $cf "--config `"$cfg`" tunnel run $TunnelName" | Out-Null
-    }
-    & nssm set $TunnelService AppDirectory $repoRoot | Out-Null
-    & nssm set $TunnelService Start SERVICE_AUTO_START | Out-Null
-    & nssm restart $TunnelService | Out-Null
-    $allOk = (Step "TunnelService" $true "Service $TunnelService running" $null) -and $allOk
+  $cf = (Get-Command cloudflared.exe).Source
+  $svc = Get-Service -Name $TunnelService -ErrorAction SilentlyContinue
+  if (-not $svc) {
+    & nssm install $TunnelService $cf "--config `"$cfg`" tunnel run $TunnelName" | Out-Null
+  }
+  & nssm set $TunnelService AppDirectory $repoRoot | Out-Null
+  & nssm set $TunnelService Start SERVICE_AUTO_START | Out-Null
+  & nssm restart $TunnelService | Out-Null
+  $allOk = (Step "TunnelService" $true "Service $TunnelService running" $null) -and $allOk
 }
 catch {
-    $allOk = (Step "TunnelService" $false "Failed to install/start $TunnelService" "Try: nssm install $TunnelService `"<cloudflared.exe path>`" `"...`"") -and $allOk
+  $allOk = (Step "TunnelService" $false "Failed to install/start $TunnelService" "Try: nssm install $TunnelService `"<cloudflared.exe path>`" `"...`"") -and $allOk
 }
 
 # 7) public health
 try {
-    $out = & curl.exe --ssl-no-revoke -I $PublicHealthUrl 2>$null
-    $okPub = ($out | Select-String -Pattern "HTTP/\d(\.\d)?\s+200").Count -gt 0
-    $allOk = (Step "PublicHealth" $okPub "HEAD $PublicHealthUrl => 200" "Check tunnel logs: cloudflared tunnel run --loglevel debug $TunnelName") -and $allOk
+  $out = & curl.exe --ssl-no-revoke -I $PublicHealthUrl 2>$null
+  $okPub = ($out | Select-String -Pattern "HTTP/\d(\.\d)?\s+200").Count -gt 0
+  $allOk = (Step "PublicHealth" $okPub "HEAD $PublicHealthUrl => 200" "Check tunnel logs: cloudflared tunnel run --loglevel debug $TunnelName") -and $allOk
 }
 catch {
-    $allOk = (Step "PublicHealth" $false "curl failed" "Run: curl.exe --ssl-no-revoke -I $PublicHealthUrl") -and $allOk
+  $allOk = (Step "PublicHealth" $false "curl failed" "Run: curl.exe --ssl-no-revoke -I $PublicHealthUrl") -and $allOk
 }
 
 if ($allOk) {
-    Write-Host "`nALL PASS ✅" -ForegroundColor Green
-    exit 0
+  Write-Host "`nALL PASS ✅" -ForegroundColor Green
+  exit 0
 }
 else {
-    Write-Host "`nSOME FAIL ❌ (ดู FIX ต่อ step)" -ForegroundColor Red
-    exit 1
+  Write-Host "`nSOME FAIL ❌ (ดู FIX ต่อ step)" -ForegroundColor Red
+  exit 1
 }
 =======
 param(
@@ -209,7 +209,8 @@ function Write-StepResult {
 
   if ($Pass) {
     Write-Host ("PASS [{0}] {1}" -f $Step, $Detail) -ForegroundColor Green
-  } else {
+  }
+  else {
     $script:failed = $true
     Write-Host ("FAIL [{0}] {1}" -f $Step, $Detail) -ForegroundColor Red
     if ($Fix) {
@@ -223,7 +224,8 @@ function Test-Health {
   try {
     $res = Invoke-WebRequest -UseBasicParsing -Uri $Url -TimeoutSec 10
     return ($res.StatusCode -ge 200 -and $res.StatusCode -lt 300)
-  } catch {
+  }
+  catch {
     return $false
   }
 }
@@ -263,7 +265,8 @@ $envLine = "PORT=$Port DOTENV_CONFIG_PATH=$RepoDir\.env DOTENV_CONFIG_OVERRIDE=t
 try {
   & $nssm set $WebServiceName AppEnvironmentExtra $envLine | Out-Null
   Write-StepResult -Step "2.set-web-env" -Pass $true -Detail $envLine -Fix "nssm set $WebServiceName AppEnvironmentExtra \"$envLine\""
-} catch {
+}
+catch {
   Write-StepResult -Step "2.set-web-env" -Pass $false -Detail $_.Exception.Message -Fix "Run PowerShell as Administrator and retry"
 }
 
@@ -271,7 +274,8 @@ try {
   & $nssm restart $WebServiceName | Out-Null
   Start-Sleep -Seconds 2
   Write-StepResult -Step "3.restart-web" -Pass $true -Detail "restarted $WebServiceName" -Fix "nssm restart $WebServiceName"
-} catch {
+}
+catch {
   Write-StepResult -Step "3.restart-web" -Pass $false -Detail $_.Exception.Message -Fix "Check service config: nssm edit $WebServiceName"
 }
 
@@ -283,7 +287,8 @@ if (Test-Path -LiteralPath $CloudflaredConfigPath -PathType Leaf) {
   $cfg = Get-Content -LiteralPath $CloudflaredConfigPath -Raw
   $cfgOk = $cfg -match "http://127\.0\.0\.1:4101"
   Write-StepResult -Step "5.cloudflared-config" -Pass $cfgOk -Detail $CloudflaredConfigPath -Fix "Set ingress service to http://127.0.0.1:4101 in $CloudflaredConfigPath"
-} else {
+}
+else {
   Write-StepResult -Step "5.cloudflared-config" -Pass $false -Detail ("missing: {0}" -f $CloudflaredConfigPath) -Fix "Create cloudflared config at $CloudflaredConfigPath"
 }
 
@@ -296,7 +301,8 @@ try {
   & $nssm set $TunnelServiceName AppParameters $cloudflaredArgs | Out-Null
   & $nssm restart $TunnelServiceName | Out-Null
   Write-StepResult -Step "6.tunnel-service" -Pass $true -Detail "$TunnelServiceName => $cloudflaredArgs" -Fix "nssm set $TunnelServiceName AppParameters \"$cloudflaredArgs\""
-} catch {
+}
+catch {
   Write-StepResult -Step "6.tunnel-service" -Pass $false -Detail $_.Exception.Message -Fix "Ensure cloudflared is installed and run PowerShell as Administrator"
 }
 
