@@ -25,6 +25,8 @@ curl.exe -sS -H "x-admin-key: $env:ADMIN_KEY" "$env:MMK_BASE/api/withdraw/queue"
 ```
 
 ## 5) Cloudflared 502 troubleshooting
+> ถ้าโดเมน 502 ให้รัน `scripts/sync-cloudflared-port.ps1` ก่อนเสมอ
+
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\fix-cloudflared-port.ps1 -Hostname mmk1000.bn9.app -ExpectedOriginUrl http://127.0.0.1:4100
 ```

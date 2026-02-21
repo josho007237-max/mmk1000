@@ -87,6 +87,8 @@ Do not switch between `localhost` and `127.0.0.1` for the UI. They are different
 # mmk1000
 
 ## Cloudflared 502 Fix (PowerShell)
+> ถ้าโดเมน 502 ให้รัน `scripts/sync-cloudflared-port.ps1` ก่อนเสมอ
+
 ตรวจและแก้ origin port ที่ cloudflared ส่งต่อ พร้อมเช็คสุขภาพปลายทาง:
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\fix-cloudflared-port.ps1 `
