@@ -126,7 +126,7 @@ try {
 
   if ($hostMatch.Success) {
     $blockBody = $hostMatch.Groups[2].Value
-    $newBlockBody = [regex]::Replace($blockBody, '(?m)^\s*service:\s*http://127\.0\.0\.1:\d+\s*$', "  service: $expectedOrigin", 1)
+    $newBlockBody = [regex]::Replace($blockBody, '(?m)^\s*service:\s*\S+\s*$', "  service: $expectedOrigin", 1)
 
     if ($newBlockBody -eq $blockBody) {
       $newBlockBody = "  service: $expectedOrigin`r`n" + $blockBody
@@ -135,7 +135,7 @@ try {
     $replacementBlock = $hostMatch.Groups[1].Value + $newBlockBody + $hostMatch.Groups[3].Value
     $updated = $raw.Substring(0, $hostMatch.Index) + $replacementBlock + $raw.Substring($hostMatch.Index + $hostMatch.Length)
   } else {
-    $fallbackPattern = "(?ms)(-\s*hostname:\s*$([regex]::Escape($Hostname))\s*\r?\n\s*service:\s*)http://127\.0\.0\.1:\d+"
+    $fallbackPattern = "(?ms)(-\s*hostname:\s*$([regex]::Escape($Hostname))\s*\r?\n.*?\r?\n\s*service:\s*)\S+"
     $updated = [regex]::Replace($raw, $fallbackPattern, "`${1}$expectedOrigin", 1)
   }
 
