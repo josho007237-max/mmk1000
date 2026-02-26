@@ -1,60 +1,205 @@
 [CmdletBinding()]
 param(
-  [string]$ConfigPath = "$env:USERPROFILE\.cloudflared\config.yml",
-  [string]$Hostname = "mmk1000.bn9.app",
-  [string]$ExpectedOriginUrl = "http://127.0.0.1:4100",
-  [string]$ServiceName = "Cloudflared"
+  [string]$Hostname = 'mmk1000.bn9.app',
+  [string]$ServiceName = 'cloudflared',
+  [string]$ConfigPath,
+  [int[]]$ProbePorts = @(4100, 3000, 8080)
 )
 
 Set-StrictMode -Version Latest
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = 'Stop'
 
-if (-not (Test-Path $ConfigPath)) {
-  throw "config_not_found: $ConfigPath"
+function To-PassFail {
+  param([bool]$Value)
+  if ($Value) { return 'PASS' }
+  return 'FAIL'
 }
 
-$raw = Get-Content -Path $ConfigPath -Raw
-$serviceRegex = '(?m)^\s*service:\s*https?://[^\r\n]+'
-$replacement = "service: $ExpectedOriginUrl"
-$updated = [regex]::Replace($raw, $serviceRegex, $replacement, 1)
+function Test-LocalHealthPort {
+  param([Parameter(Mandatory = $true)][int]$Port)
 
-if ($updated -ne $raw) {
-  Set-Content -Path $ConfigPath -Value $updated -Encoding UTF8
-  Write-Host "config_updated=true path=$ConfigPath service=$ExpectedOriginUrl"
-} else {
-  Write-Host "config_updated=false path=$ConfigPath"
+  $url = "http://127.0.0.1:$Port/api/health"
+  $out = & curl.exe -sS -i --connect-timeout 3 --max-time 8 $url 2>&1
+  $curlExitCode = $LASTEXITCODE
+  $httpLine = ($out | Where-Object { $_ -match '^HTTP/\d' } | Select-Object -Last 1)
+  $statusCode = 0
+  if ($httpLine -and $httpLine -match '^HTTP/\d(?:\.\d)?\s+(\d{3})') {
+    $statusCode = [int]$Matches[1]
+  }
+
+  [PSCustomObject]@{
+    Port         = $Port
+    CurlExitCode = $curlExitCode
+    StatusCode   = $statusCode
+  }
 }
 
-$hostBlock = Select-String -Path $ConfigPath -Pattern "hostname:\s*$([regex]::Escape($Hostname))" -Context 0,3 | Select-Object -First 1
-if ($hostBlock) {
-  Write-Host "hostname_block_found=true hostname=$Hostname"
-  $hostBlock.Line
-  $hostBlock.Context.PostContext | ForEach-Object { Write-Host $_ }
-} else {
-  Write-Host "hostname_block_found=false hostname=$Hostname"
+function Get-CloudflaredService {
+  $services = @(Get-CimInstance Win32_Service | Where-Object {
+      (($_.Name -match 'cloudflared') -or ($_.DisplayName -match 'cloudflared'))
+    })
+
+  if (-not $services) {
+    throw 'cloudflared_service_not_found'
+  }
+
+  $running = $services | Where-Object { $_.State -eq 'Running' } | Select-Object -First 1
+  if ($running) { return $running }
+
+  $hint = $services | Where-Object { $_.Name -ieq $ServiceName -or $_.DisplayName -ieq $ServiceName } | Select-Object -First 1
+  if ($hint) { return $hint }
+
+  return ($services | Select-Object -First 1)
 }
 
-if (Get-Service -Name $ServiceName -ErrorAction SilentlyContinue) {
-  Restart-Service -Name $ServiceName -Force
+function Get-ConfigPathFromService {
+  param([Parameter(Mandatory = $true)]$Service)
+
+  $pathName = "$($Service.PathName)"
+  if ($pathName -match '--config\s+"([^"]+)"') { return $Matches[1] }
+  if ($pathName -match '--config="([^"]+)"') { return $Matches[1] }
+  if ($pathName -match '--config\s+([^\s"]+)') { return $Matches[1] }
+  if ($pathName -match '--config=([^\s"]+)') { return $Matches[1] }
+  return $null
+}
+
+function Get-CloudflaredExe {
+  param([Parameter(Mandatory = $true)]$Service)
+
+  $pathName = "$($Service.PathName)"
+  if ($pathName -match '^"([^"]*cloudflared(?:\.exe)?)"') { return $Matches[1] }
+  if ($pathName -match '^([^\s"]*cloudflared(?:\.exe)?)') { return $Matches[1] }
+  return 'cloudflared.exe'
+}
+
+$validatePass = $false
+$restartPass = $false
+$domainPass = $false
+$domainHttpCode = 0
+$detectedPort = $null
+$finalConfigPath = $null
+
+try {
+  $detectedPort = $null
+  if ($env:PORT -match '^\d+$') {
+    $detectedPort = [int]$env:PORT
+  } else {
+    $portsToTry = [System.Collections.Generic.List[int]]::new()
+
+    if ($env:MMK_LOCAL -and $env:MMK_LOCAL -match ':(\d+)(?:/|$)') {
+      [void]$portsToTry.Add([int]$Matches[1])
+    }
+
+    foreach ($p in $ProbePorts) {
+      if ($p -gt 0 -and -not $portsToTry.Contains($p)) { [void]$portsToTry.Add($p) }
+    }
+
+    foreach ($port in $portsToTry) {
+      $probe = Test-LocalHealthPort -Port $port
+      if ($probe.CurlExitCode -eq 0 -and $probe.StatusCode -eq 200) {
+        $detectedPort = $port
+        break
+      }
+    }
+  }
+
+  if (-not $detectedPort) {
+    throw 'unable_to_detect_port'
+  }
+
+  $service = Get-CloudflaredService
+
+  $configFromService = Get-ConfigPathFromService -Service $service
+  if ($configFromService) {
+    $finalConfigPath = $configFromService
+  } elseif ($ConfigPath) {
+    $finalConfigPath = $ConfigPath
+  } elseif (Test-Path (Join-Path $env:USERPROFILE '.cloudflared\mmk1000.yml')) {
+    $finalConfigPath = Join-Path $env:USERPROFILE '.cloudflared\mmk1000.yml'
+  } else {
+    $finalConfigPath = Join-Path $env:USERPROFILE '.cloudflared\config.yml'
+  }
+
+  if (-not (Test-Path $finalConfigPath)) {
+    throw "config_not_found: $finalConfigPath"
+  }
+
+  $backupPath = "$finalConfigPath.bak_$(Get-Date -Format 'yyyyMMdd_HHmmss')"
+  Copy-Item -Path $finalConfigPath -Destination $backupPath -Force
+
+  $expectedOrigin = "http://127.0.0.1:$detectedPort"
+  $raw = Get-Content -Path $finalConfigPath -Raw
+
+  $hostPattern = "(?ms)(-\s*hostname:\s*$([regex]::Escape($Hostname))\s*\r?\n)(.*?)(\r?\n\s*-\s*hostname:|\r?\n\s*-\s*service:|\r?\n\s*ingress:|\z)"
+  $hostMatch = [regex]::Match($raw, $hostPattern)
+  $updated = $raw
+
+  if ($hostMatch.Success) {
+    $blockBody = $hostMatch.Groups[2].Value
+    $newBlockBody = [regex]::Replace($blockBody, '(?m)^\s*service:\s*\S+\s*$', "  service: $expectedOrigin", 1)
+
+    if ($newBlockBody -eq $blockBody) {
+      $newBlockBody = "  service: $expectedOrigin`r`n" + $blockBody
+    }
+
+    $replacementBlock = $hostMatch.Groups[1].Value + $newBlockBody + $hostMatch.Groups[3].Value
+    $updated = $raw.Substring(0, $hostMatch.Index) + $replacementBlock + $raw.Substring($hostMatch.Index + $hostMatch.Length)
+  } else {
+    $fallbackPattern = "(?ms)(-\s*hostname:\s*$([regex]::Escape($Hostname))\s*\r?\n.*?\r?\n\s*service:\s*)\S+"
+    $updated = [regex]::Replace($raw, $fallbackPattern, "`${1}$expectedOrigin", 1)
+  }
+
+  if ($updated -eq $raw) {
+    throw 'target_hostname_service_not_updated'
+  }
+
+  Set-Content -Path $finalConfigPath -Value $updated -Encoding UTF8
+
+  $cloudflaredExe = Get-CloudflaredExe -Service $service
+  & $cloudflaredExe tunnel ingress validate --config $finalConfigPath
+  $validatePass = ($LASTEXITCODE -eq 0)
+  if (-not $validatePass) {
+    throw 'cloudflared_ingress_validate_failed'
+  }
+
+  Restart-Service -Name $service.Name -Force
   Start-Sleep -Seconds 2
-  $svc = Get-Service -Name $ServiceName
-  Write-Host "service_status=$($svc.Status)"
-} else {
-  Write-Host "service_missing=$ServiceName"
-}
+  $restartPass = ((Get-Service -Name $service.Name).Status -eq 'Running')
+  if (-not $restartPass) {
+    throw 'cloudflared_restart_failed'
+  }
 
-$healthUrl = "https://$Hostname/api/health"
-$out = & curl.exe -sS -I --ssl-no-revoke --connect-timeout 8 --max-time 20 $healthUrl 2>&1
-$curlExitCode = $LASTEXITCODE
-$out | ForEach-Object { Write-Host $_ }
-if ($curlExitCode -ne 0) {
-  Write-Host "health_check=failed curl_exit_code=$curlExitCode"
-  exit $curlExitCode
-}
+  $healthUrl = "https://$Hostname/api/health"
+  $out = & curl.exe -sS -i --ssl-no-revoke --connect-timeout 8 --max-time 20 $healthUrl 2>&1
+  $curlExitCode = $LASTEXITCODE
+  $httpLine = ($out | Where-Object { $_ -match '^HTTP/\d' } | Select-Object -Last 1)
+  if ($httpLine -and $httpLine -match '^HTTP/\d(?:\.\d)?\s+(\d{3})') {
+    $domainHttpCode = [int]$Matches[1]
+  }
 
-if ($out -match 'HTTP/\d+(?:\.\d+)?\s+502') {
-  Write-Host "health_check=bad_gateway_502"
-  exit 502
-}
+  $domainPass = ($curlExitCode -eq 0) -and ($domainHttpCode -in @(200, 403))
 
-Write-Host "health_check=ok url=$healthUrl"
+  Write-Host "summary_detected_port=$detectedPort"
+  Write-Host "summary_config_path=$finalConfigPath"
+  Write-Host "summary_validate=$(To-PassFail $validatePass)"
+  Write-Host "summary_restart=$(To-PassFail $restartPass)"
+  Write-Host "summary_domain=$(To-PassFail $domainPass) http=$domainHttpCode"
+
+  $overallPass = $validatePass -and $restartPass -and $domainPass
+  $overallExit = if ($overallPass) { 0 } else { 1 }
+  Write-Host "summary_overall=$(To-PassFail $overallPass) exit=$overallExit"
+  exit $overallExit
+}
+catch {
+  if (-not $detectedPort) { $detectedPort = '' }
+  if (-not $finalConfigPath) { $finalConfigPath = '' }
+
+  Write-Host "summary_detected_port=$detectedPort"
+  Write-Host "summary_config_path=$finalConfigPath"
+  Write-Host "summary_validate=$(To-PassFail $validatePass)"
+  Write-Host "summary_restart=$(To-PassFail $restartPass)"
+  Write-Host "summary_domain=$(To-PassFail $domainPass) http=$domainHttpCode"
+  Write-Host 'summary_overall=FAIL exit=1'
+  Write-Error $_
+  exit 1
+}

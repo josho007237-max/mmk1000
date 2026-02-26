@@ -2,10 +2,17 @@
 
 ## Local Setup
 ```powershell
-npm i
+npm install
 Copy-Item .env.example .env
 # Edit .env locally with your own values. Never commit .env or .env.* files.
+$env:PORT=4100
 npm run dev
+```
+
+## Local Setup (bash)
+```bash
+npm install
+PORT=4100 npm run dev
 ```
 
 ## Env (PowerShell)
@@ -102,4 +109,3 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\manage-cloudflared-servi
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\manage-cloudflared-service.ps1 -Action restart
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\manage-cloudflared-service.ps1 -Action logs
 ```
-
