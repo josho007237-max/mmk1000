@@ -32,7 +32,10 @@ function Invoke-HealthCurl {
   }
 
   [PSCustomObject]@{
+    Url          = $Url
+    Output       = $out
     CurlExitCode = $curlExitCode
+    HttpLine     = $httpLine
     StatusCode   = $statusCode
   }
 }
@@ -40,20 +43,34 @@ function Invoke-HealthCurl {
 $localResult = Invoke-HealthCurl -Url $localHealthUrl
 $domainResult = Invoke-HealthCurl -Url $domainHealthUrl -SslNoRevoke
 
+Write-Host '=== local health ==='
+$localResult.Output | ForEach-Object { Write-Host $_ }
+Write-Host "local_status_code=$($localResult.StatusCode)"
+Write-Host "local_http_line=$($localResult.HttpLine)"
+Write-Host "local_curl_exit_code=$($localResult.CurlExitCode)"
+
+Write-Host '=== domain health ==='
+$domainResult.Output | ForEach-Object { Write-Host $_ }
+Write-Host "domain_status_code=$($domainResult.StatusCode)"
+Write-Host "domain_http_line=$($domainResult.HttpLine)"
+Write-Host "domain_curl_exit_code=$($domainResult.CurlExitCode)"
+
 $localPass = ($localResult.CurlExitCode -eq 0) -and ($localResult.StatusCode -eq 200)
 $domainPass = ($domainResult.CurlExitCode -eq 0) -and ($domainResult.StatusCode -in @(200, 403))
 
-$exitCode = 0
-if (-not $localPass -and -not $domainPass) {
-  $exitCode = 3
-} elseif (-not $localPass) {
-  $exitCode = 1
-} elseif (-not $domainPass) {
-  $exitCode = 2
+Write-Host "summary_local=$($localPass ? 'PASS' : 'FAIL')"
+Write-Host "summary_domain=$($domainPass ? 'PASS' : 'FAIL')"
+
+if ($localPass -and $domainPass) {
+  Write-Host 'summary_overall=PASS'
+  exit 0
 }
 
-Write-Host "summary_local=$($localPass ? 'PASS' : 'FAIL') http=$($localResult.StatusCode) url=$localHealthUrl"
-Write-Host "summary_domain=$($domainPass ? 'PASS' : 'FAIL') http=$($domainResult.StatusCode) url=$domainHealthUrl"
-Write-Host "summary_overall=$($exitCode -eq 0 ? 'PASS' : 'FAIL') exit=$exitCode"
-
-exit $exitCode
+Write-Host 'summary_overall=FAIL'
+if (-not $localPass -and -not $domainPass) {
+  exit 3
+}
+if (-not $localPass) {
+  exit 1
+}
+exit 2
