@@ -157,6 +157,9 @@ if ($domainPass) {
   Write-Host 'summary_overall=PASS'
   exit 0
 }
+catch {
+  if (-not $detectedPort) { $detectedPort = '' }
+  if (-not $finalConfigPath) { $finalConfigPath = '' }
 
 Write-Host 'summary_overall=FAIL'
 exit 1
